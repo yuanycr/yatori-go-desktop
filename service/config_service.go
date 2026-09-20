@@ -23,6 +23,7 @@ type Setting struct {
 }
 
 type BasicSetting struct {
+	MaxWorkers     int    `yaml:"maxWorkers,omitempty" json:"maxWorkers,omitempty"`
 	CompletionTone int    `yaml:"completionTone" json:"completionTone"`
 	ColorLog       int    `yaml:"colorLog" json:"colorLog"`
 	LogOutFileSw   int    `yaml:"logOutFileSw" json:"logOutFileSw"`

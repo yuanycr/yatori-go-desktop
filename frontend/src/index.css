@@ -1360,3 +1360,6 @@ button:hover .announce-bell {
   .animated-select-menu.closing,
   .animated-select-chevron { animation: none !important; transition-duration: 0.01ms !important; }
 }
+
+/* Compatible with Android WebView versions without dvh support. */
+@media(max-width:760px){.log-area{height:340px;max-height:340px;min-height:0;overflow-y:auto;overflow-x:hidden;flex:0 0 auto}.log-center-area.log-area{height:calc(100vh - 280px);max-height:calc(100vh - 280px);min-height:180px}}

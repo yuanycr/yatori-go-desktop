@@ -105,7 +105,9 @@ func SafeRunWithExamOptions(ctx context.Context, setting consoleConfig.Setting,
 	randomAnswerOnFail := examOptions.RandomAnswerOnFail
 
 	// 拉取课程
-	courseList, err := xuexitong.XueXiTPullCourseAction(cache)
+	courseCtx, courseCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer courseCancel()
+	courseList, err := xuexitong.XueXiTPullCourseActionContext(courseCtx, cache)
 	if err != nil {
 		return fmt.Errorf("拉取课程失败: %w", err)
 	}
@@ -114,6 +116,7 @@ func SafeRunWithExamOptions(ctx context.Context, setting consoleConfig.Setting,
 		emit("[%s] [系统] %s", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(f, a...))
 	}
 	sysLog("已拉取课程总数：%d", len(courseList))
+	sysLog("includeCourses=%v excludeCourses=%v", user.CoursesCustom.IncludeCourses, user.CoursesCustom.ExcludeCourses)
 	for _, c := range courseList {
 		sysLog("课程 [%s] courseId=%s key=%s isStart=%v state=%d",
 			c.CourseName, c.CourseID, c.Key, c.IsStart, c.State)
@@ -159,23 +162,24 @@ func SafeRunWithExamOptions(ctx context.Context, setting consoleConfig.Setting,
 		// 排除课程（按名称精确匹配）
 		if len(user.CoursesCustom.ExcludeCourses) > 0 &&
 			consoleConfig.CmpCourse(course.CourseName, user.CoursesCustom.ExcludeCourses) {
-			// 只统计过滤结果，避免启动时大量跳过日志刷屏。
+			sysLog("课程被排除列表跳过：course=%s", course.CourseName)
 			excluded++
 			continue
 		}
 		// 包含课程（按名称精确匹配；为空则全部学）
 		if len(user.CoursesCustom.IncludeCourses) > 0 &&
 			!consoleConfig.CmpCourse(course.CourseName, user.CoursesCustom.IncludeCourses) {
-			// 只统计过滤结果，避免启动时大量跳过日志刷屏。
+			sysLog("课程被包含列表跳过：course=%s", course.CourseName)
 			skipped++
 			continue
 		}
 		if !course.IsStart {
-			// 只统计过滤结果，避免启动时大量跳过日志刷屏。
+			sysLog("课程未开课，跳过：course=%s state=%d jobRate=%.2f", course.CourseName, course.State, course.JobRate)
 			skipped++
 			continue
 		}
 		included++
+		sysLog("课程过滤通过：course=%s state=%d isStart=%v jobRate=%.2f finish=%d/%d", course.CourseName, course.State, course.IsStart, course.JobRate, course.JobFinishCount, course.JobCount)
 
 		if user.CoursesCustom.VideoModel == 1 {
 			// 串行
@@ -203,11 +207,19 @@ func safeRunCourse(ctx context.Context, setting consoleConfig.Setting,
 	submitThreshold int, randomAnswerOnFail int, emit emitFn) {
 
 	if ctx.Err() != nil {
+		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "ctx 已取消，跳过课程"))
+		return
+	}
+	if !course.IsStart {
+		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "课程未开课，跳过"))
 		return
 	}
 	if course.State == 1 {
+		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", fmt.Sprintf("课程已结束，跳过：course=%s state=%d jobRate=%.2f", course.CourseName, course.State, course.JobRate)))
 		return
 	}
+
+	emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "开始处理课程"))
 
 	// 章节学习
 	if err := safeRunChapter(ctx, setting, user, cache, course, model3Caches, nodeSem, nodeSemMu, nodeSemUsed, submitThreshold, randomAnswerOnFail, emit); err != nil {
@@ -224,18 +236,32 @@ func safeRunChapter(ctx context.Context, setting consoleConfig.Setting,
 	model3Caches []xuexitongApi.XueXiTUserCache, nodeSem chan struct{}, nodeSemMu *sync.Mutex, nodeSemUsed *int,
 	submitThreshold int, randomAnswerOnFail int, emit emitFn) error {
 
-	// 只在进度未完成且课程未结束时执行
-	if !(course.JobRate < 100 && course.State != 1) {
+	if ctx.Err() != nil {
+		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "ctx 已取消，跳过章节"))
+		return ctx.Err()
+	}
+	if course.JobRate >= 100 || course.State == 1 {
+		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "课程已完成，跳过章节"))
 		return nil
 	}
+	emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "开始拉取章节"))
 
 	key, _ := strconv.Atoi(course.Key)
-	action, _, err := xuexitong.PullCourseChapterAction(cache, course.Cpi, key)
+	chapterCtx, chapterCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer chapterCancel()
+	action, _, err := xuexitong.PullCourseChapterActionContext(chapterCtx, cache, course.Cpi, key)
 	if err != nil {
 		if strings.Contains(err.Error(), "课程章节为空") {
+			emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "章节为空"))
 			return nil
 		}
+		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "章节请求失败: "+err.Error()))
 		return fmt.Errorf("拉取章节信息失败: %w", err)
+	}
+	emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", fmt.Sprintf("获取课程章节成功，章节数量=%d", len(action.Knowledge))))
+	if len(action.Knowledge) == 0 {
+		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "章节为空"))
+		return nil
 	}
 
 	if user.CoursesCustom.ShuffleSw == 1 {
@@ -254,8 +280,11 @@ func safeRunChapter(ctx context.Context, setting consoleConfig.Setting,
 
 	courseId, _ := strconv.Atoi(course.CourseID)
 	userId, _ := strconv.Atoi(cache.UserID)
-	pointAction, err := xuexitong.ChapterFetchPointAction(cache, nodes, &action, key, userId, course.Cpi, courseId)
+	pointCtx, pointCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer pointCancel()
+	pointAction, err := xuexitong.ChapterFetchPointActionContext(pointCtx, cache, nodes, &action, key, userId, course.Cpi, courseId)
 	if err != nil {
+		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "节点完成状态请求失败: "+err.Error()))
 		return fmt.Errorf("探测节点完成情况失败: %w", err)
 	}
 
@@ -321,6 +350,7 @@ func safeRunNode(ctx context.Context, setting consoleConfig.Setting,
 	nodes []int, index, key, courseId int, nodeSem chan struct{}, nodeSemMu *sync.Mutex, nodeSemUsed *int, submitThreshold int, randomAnswerOnFail int, emit emitFn) {
 
 	if ctx.Err() != nil {
+		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", "", "ctx 已取消，跳过任务点"))
 		return
 	}
 
@@ -341,23 +371,31 @@ func safeRunNode(ctx context.Context, setting consoleConfig.Setting,
 		}
 	}()
 
+	emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, tp, "", "开始请求任务点卡片"))
 	_, fetchCards, err := xuexitong.ChapterFetchCardsAction(cache, &action, nodes, index, courseId, key, course.Cpi)
 	if err != nil {
-		xlog(tp, "", "拉取卡片失败: "+err.Error())
+		xlog(tp, "", "卡片请求失败: "+err.Error())
 		return
 	}
+	xlog(tp, "", "视频卡片加载成功")
 
 	videoDTOs, workDTOs, documentDTOs, hyperlinkDTOs, liveDTOs, bbsDTOs := xuexitongApi.ParsePointDto(fetchCards)
 
 	if videoDTOs == nil && workDTOs == nil && documentDTOs == nil &&
 		hyperlinkDTOs == nil && liveDTOs == nil && bbsDTOs == nil {
+		xlog(tp, "", "视频列表为空，任务点无可执行卡片")
 		return
 	}
+	xlog(tp, "", fmt.Sprintf("videoDTOs数量=%d", len(videoDTOs)))
 
 	// 视频/音频
 	if videoDTOs != nil && user.CoursesCustom.VideoModel != 0 {
 		// acquire nodeSem
-		nodeSem <- struct{}{}
+		select {
+		case nodeSem <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
 		nodeSemMu.Lock()
 		(*nodeSemUsed)++
 		nodeSemMu.Unlock()
@@ -371,6 +409,7 @@ func safeRunNode(ctx context.Context, setting consoleConfig.Setting,
 		}()
 		for _, v := range videoDTOs {
 			if ctx.Err() != nil {
+				xlog(tp, "", "ctx 已取消，停止视频任务")
 				return
 			}
 			card, enc, err := xuexitong.PageMobileChapterCardAction(
@@ -392,8 +431,10 @@ func safeRunNode(ctx context.Context, setting consoleConfig.Setting,
 			if !v.IsJob {
 				continue
 			}
+			xlog(tp, v.Title, "开始执行视频任务")
 			v.Enc = enc
 			xxtLogic.ExecuteVideo(user, cache, course, curKnowledge, &v, key, course.Cpi)
+			xlog(tp, "", "视频任务执行函数已返回，结果以上游日志为准")
 			sleepCtx(ctx, time.Duration(rand.Intn(51)+10)*time.Second)
 		}
 	}
