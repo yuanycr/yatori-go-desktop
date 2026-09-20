@@ -104,6 +104,7 @@ func Init(dataDir string) string {
 	state.logs = appendLimited(state.logs, logLine("system", "Go Mobile Core initialized"))
 	state.Unlock()
 
+	initPlatformLogs()
 	return ok(initInfo{DataDir: dataDir, DesktopCore: CoreVersion, APISchemaVersion: APISchemaVersion})
 }
 
