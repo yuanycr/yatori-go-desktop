@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.4.0",
+    [string]$Version = "0.4.1",
     [int]$ApiSchemaVersion = 1,
     [int]$AndroidApi = 24,
     [string]$Target = "android/arm64",

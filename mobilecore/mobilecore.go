@@ -23,8 +23,10 @@ import (
 )
 
 const (
-	CoreVersion      = "0.4.0"
+	CoreVersion      = "0.4.1"
 	APISchemaVersion = 1
+	// Keep Android account-level concurrency identical to the desktop task manager.
+	desktopMaxConcurrentAccountTasks = 5
 )
 
 var state = struct {
@@ -34,11 +36,17 @@ var state = struct {
 	logs       []string
 	tasks      map[string]taskStatus
 	cancels    map[string]context.CancelFunc
+	timers     map[string]*time.Timer
+	timerGen   map[string]uint64
+	taskGen    map[string]uint64
 	maxWorkers int
 }{
 	tasks:      map[string]taskStatus{},
 	cancels:    map[string]context.CancelFunc{},
-	maxWorkers: 3,
+	timers:     map[string]*time.Timer{},
+	timerGen:   map[string]uint64{},
+	taskGen:    map[string]uint64{},
+	maxWorkers: desktopMaxConcurrentAccountTasks,
 }
 
 type initInfo struct {
@@ -66,6 +74,9 @@ type taskStatus struct {
 }
 
 func Init(dataDir string) string {
+	if loc, err := time.LoadLocation("Asia/Shanghai"); err == nil {
+		time.Local = loc
+	}
 	if dataDir == "" {
 		return fail(CodeInvalidArgument, "dataDir cannot be empty")
 	}
@@ -90,6 +101,9 @@ func Init(dataDir string) string {
 	if err != nil {
 		return fail(CodeInternalError, err.Error())
 	}
+	// Be defensive for configs produced by older builds or external editors.
+	// A zero worker limit makes every StartTask request fail immediately.
+	cfg.Setting.BasicSetting.MaxWorkers = desktopMaxConcurrentAccountTasks
 	if err := service.SaveConfig(configPath, cfg); err != nil {
 		return fail(CodeInternalError, err.Error())
 	}
@@ -147,9 +161,7 @@ func SaveConfigJSON(configJSON string) string {
 	if cfg.Setting.BasicSetting.LogLevel == "" {
 		cfg.Setting.BasicSetting.LogLevel = "INFO"
 	}
-	if cfg.Setting.BasicSetting.MaxWorkers <= 0 {
-		cfg.Setting.BasicSetting.MaxWorkers = 3
-	}
+	cfg.Setting.BasicSetting.MaxWorkers = desktopMaxConcurrentAccountTasks
 	if errs := service.ValidateConfig(cfg); len(errs) > 0 {
 		return fail(CodeInvalidArgument, errs[0])
 	}
@@ -174,9 +186,7 @@ func ImportConfigText(text string) string {
 	if cfg.Setting.BasicSetting.LogLevel == "" {
 		cfg.Setting.BasicSetting.LogLevel = "INFO"
 	}
-	if cfg.Setting.BasicSetting.MaxWorkers <= 0 {
-		cfg.Setting.BasicSetting.MaxWorkers = 3
-	}
+	cfg.Setting.BasicSetting.MaxWorkers = desktopMaxConcurrentAccountTasks
 	if errs := service.ValidateConfig(cfg); len(errs) > 0 {
 		return fail(CodeInvalidArgument, errs[0])
 	}
@@ -233,6 +243,7 @@ func UpdateAccountJSON(accountJSON string) string {
 	if err := service.UpdateAccount(req); err != nil {
 		return fail(CodeInternalError, err.Error())
 	}
+	updateTaskDuration(req.UID, req.RunDurationMinutes)
 	return ok("ok")
 }
 
@@ -317,7 +328,12 @@ func GetCoursesJSON(uid string) string {
 	return ok(courses)
 }
 
-func StartTask(uid string) string {
+func StartTask(uid string) (result string) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = fail(CodeInternalError, fmt.Sprintf("start task panic: %v", r))
+		}
+	}()
 	if err := ensureInitialized(); err != nil {
 		return fail(CodeNotInitialized, err.Error())
 	}
@@ -347,6 +363,8 @@ func StartTask(uid string) string {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	state.cancels[uid] = cancel
+	state.taskGen[uid]++
+	taskGen := state.taskGen[uid]
 	state.tasks[uid] = taskStatus{
 		UID:       uid,
 		Account:   po.Account,
@@ -356,9 +374,11 @@ func StartTask(uid string) string {
 		LastLog:   logLine("system", "task started"),
 	}
 	state.logs = appendLimited(state.logs, logLine("system", "task started uid="+uid))
+	state.timerGen[uid]++
 	state.Unlock()
+	updateTaskDuration(uid, po.RunDurationMinutes)
 
-	go runMobileTask(ctx, po)
+	go runMobileTask(ctx, po, taskGen)
 	return ok("ok")
 }
 
@@ -367,11 +387,20 @@ func StopTask(uid string) string {
 		return fail(CodeInvalidArgument, "uid cannot be empty")
 	}
 	state.Lock()
+	if timer := state.timers[uid]; timer != nil {
+		timer.Stop()
+		delete(state.timers, uid)
+	}
+	state.timerGen[uid]++
+	task, exists := state.tasks[uid]
+	if !exists {
+		state.Unlock()
+		return ok("ok")
+	}
 	if cancel, ok := state.cancels[uid]; ok {
 		cancel()
 		delete(state.cancels, uid)
 	}
-	task := state.tasks[uid]
 	task.UID = uid
 	task.State = "stopped"
 	task.LastLog = logLine("system", "task stopped")
@@ -379,6 +408,28 @@ func StopTask(uid string) string {
 	state.logs = appendLimited(state.logs, logLine("system", "task stopped uid="+uid))
 	state.Unlock()
 	return ok("ok")
+}
+
+// updateTaskDuration replaces the timer for the current running task only.
+// It is safe to call after an account edit even when that account is idle.
+func updateTaskDuration(uid string, minutes int) {
+	if uid == "" || minutes < 0 {
+		return
+	}
+	state.Lock()
+	if timer := state.timers[uid]; timer != nil {
+		timer.Stop()
+		delete(state.timers, uid)
+	}
+	state.timerGen[uid]++
+	gen := state.timerGen[uid]
+	task, running := state.tasks[uid]
+	if running && task.State == "running" && minutes > 0 {
+		state.timers[uid] = time.AfterFunc(time.Duration(minutes)*time.Minute, func() {
+			autoStopTask(uid, gen, minutes)
+		})
+	}
+	state.Unlock()
 }
 
 func GetTaskStatusesJSON() string {
@@ -483,7 +534,7 @@ func currentConfigPath() string {
 	return path
 }
 
-func runMobileTask(ctx context.Context, po service.AccountPO) {
+func runMobileTask(ctx context.Context, po service.AccountPO, taskGen uint64) {
 	uid := po.UID
 	emit := func(format string, args ...interface{}) {
 		select {
@@ -500,14 +551,14 @@ func runMobileTask(ctx context.Context, po service.AccountPO) {
 	defer func() {
 		if r := recover(); r != nil {
 			pushTaskLog(uid, fmt.Sprintf("worker panic: %v\n%s", r, debug.Stack()))
-			finishTask(uid, "failed", fmt.Sprintf("%v", r))
+			finishTask(uid, taskGen, "failed", fmt.Sprintf("%v", r))
 		}
 	}()
 
 	cfg, err := service.LoadConfig(currentConfigPath())
 	if err != nil {
 		pushTaskLog(uid, "load config failed: "+err.Error())
-		finishTask(uid, "failed", err.Error())
+		finishTask(uid, taskGen, "failed", err.Error())
 		return
 	}
 	setting := buildConsoleSetting(cfg)
@@ -563,18 +614,17 @@ func runMobileTask(ctx context.Context, po service.AccountPO) {
 	default:
 		runErr = fmt.Errorf("platform %s is not supported", po.AccountType)
 	}
-	if runErr != nil {
-		pushTaskLog(uid, "task failed: "+runErr.Error())
-		finishTask(uid, "failed", runErr.Error())
+	if ctx.Err() != nil {
+		finishTask(uid, taskGen, "stopped", "")
 		return
 	}
-	select {
-	case <-ctx.Done():
-		finishTask(uid, "stopped", "")
-	default:
-		pushTaskLog(uid, "all tasks completed")
-		finishTask(uid, "stopped", "")
+	if runErr != nil {
+		pushTaskLog(uid, "task failed: "+runErr.Error())
+		finishTask(uid, taskGen, "failed", runErr.Error())
+		return
 	}
+	pushTaskLog(uid, "all tasks completed")
+	finishTask(uid, taskGen, "stopped", "")
 }
 
 func buildConsoleSetting(cfg service.AppConfig) consoleConfig.Setting {
@@ -653,14 +703,50 @@ func pushTaskLog(uid, msg string) {
 	state.tasks[uid] = task
 }
 
-func finishTask(uid, finalState, errMsg string) {
+// finishTask finalises the task row only when the worker generation still
+// matches the current run, so a stale worker cannot clobber a newly started
+// task (stop -> quick restart race).
+func finishTask(uid string, taskGen uint64, finalState, errMsg string) {
 	state.Lock()
 	defer state.Unlock()
+	if state.taskGen[uid] != taskGen {
+		return
+	}
+	if timer := state.timers[uid]; timer != nil {
+		timer.Stop()
+		delete(state.timers, uid)
+	}
+	state.timerGen[uid]++
 	task := state.tasks[uid]
 	task.State = finalState
 	task.Error = errMsg
 	state.tasks[uid] = task
 	delete(state.cancels, uid)
+}
+
+func autoStopTask(uid string, generation uint64, minutes int) {
+	state.Lock()
+	if state.timerGen[uid] != generation {
+		state.Unlock()
+		return
+	}
+	task, ok := state.tasks[uid]
+	if !ok || task.State != "running" {
+		state.Unlock()
+		return
+	}
+	if timer := state.timers[uid]; timer != nil {
+		delete(state.timers, uid)
+	}
+	if cancel := state.cancels[uid]; cancel != nil {
+		cancel()
+		delete(state.cancels, uid)
+	}
+	task.State = "stopped"
+	task.LastLog = logLine("system", fmt.Sprintf("run duration reached; task stopped (%d minutes)", minutes))
+	state.tasks[uid] = task
+	state.logs = appendLimited(state.logs, task.LastLog)
+	state.Unlock()
 }
 
 func logLine(level, msg string) string {

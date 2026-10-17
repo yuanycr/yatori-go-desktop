@@ -50,6 +50,24 @@ export default function LogsPage() {
     return off
   }, [])
 
+  // Android's WebView bridge does not expose the Wails log:all event.
+  // Poll the core while the log view is live so new task output appears
+  // without requiring a navigation change. Pausing the view also pauses IO.
+  useEffect(() => {
+    if (paused) return
+    let active = true
+    const poll = () => {
+      api.getRecentLogs(LOG_HISTORY_LIMIT).then(r => {
+        if (active && r.ok) setLines(r.data.map(stripANSI))
+      })
+    }
+    const timer = window.setInterval(poll, 2000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [paused])
+
   const setLogLevel = (next: LogLevel) => {
     setLevel(next)
     localStorage.setItem(LOG_LEVEL_STORAGE_KEY, next)
@@ -80,7 +98,7 @@ export default function LogsPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page log-center-page">
       <div className="flex-between" style={{ marginBottom: 14 }}>
         <div className="page-title" style={{ marginBottom: 0 }}>日志中心</div>
         <div className="flex-row">
@@ -116,7 +134,7 @@ export default function LogsPage() {
         </div>
       </div>
 
-      <div className="log-area" ref={ref} style={{ height: 'calc(100vh - 148px)' }}>
+      <div className="log-area" ref={ref}>
         {visible.length === 0
           ? <span className="text-muted">暂无匹配日志。切到 DEBUG 可查看全部等级日志。</span>
           : visible.map((line, i) => <div key={i} className={cls(line)}>{line}</div>)

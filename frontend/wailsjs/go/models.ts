@@ -425,6 +425,7 @@ export namespace service {
 	    account: string;
 	    password: string;
 	    isProxy: number;
+	    runDurationMinutes: number;
 	    informEmails: string[];
 	    coursesCustom: CoursesCustom;
 	
@@ -441,6 +442,7 @@ export namespace service {
 	        this.account = source["account"];
 	        this.password = source["password"];
 	        this.isProxy = source["isProxy"];
+	        this.runDurationMinutes = source["runDurationMinutes"];
 	        this.informEmails = source["informEmails"];
 	        this.coursesCustom = this.convertValues(source["coursesCustom"], CoursesCustom);
 	    }
@@ -470,6 +472,7 @@ export namespace service {
 	    remarkName: string;
 	    account: string;
 	    isProxy: number;
+	    runDurationMinutes: number;
 	    isRunning: boolean;
 	    guiSupport: string;
 	    coursesCustom: CoursesCustom;
@@ -487,6 +490,7 @@ export namespace service {
 	        this.remarkName = source["remarkName"];
 	        this.account = source["account"];
 	        this.isProxy = source["isProxy"];
+	        this.runDurationMinutes = source["runDurationMinutes"];
 	        this.isRunning = source["isRunning"];
 	        this.guiSupport = source["guiSupport"];
 	        this.coursesCustom = this.convertValues(source["coursesCustom"], CoursesCustom);
@@ -634,6 +638,7 @@ export namespace service {
 	    }
 	}
 	export class BasicSetting {
+	    maxWorkers?: number;
 	    completionTone: number;
 	    colorLog: number;
 	    logOutFileSw: number;
@@ -648,6 +653,7 @@ export namespace service {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.maxWorkers = source["maxWorkers"];
 	        this.completionTone = source["completionTone"];
 	        this.colorLog = source["colorLog"];
 	        this.logOutFileSw = source["logOutFileSw"];

@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { ExternalLink, Plus, Pencil, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 import type { AccountVO, AccountReq, CoursesCustom } from '../lib/api'
@@ -107,7 +107,7 @@ function clampVideoModel(platform: string, current: number): number {
 
 const emptyReq = (): AccountReq => ({
   uid: '', accountType: 'YINGHUA', url: '', remarkName: '', account: '',
-  password: '', isProxy: 0, informEmails: [], coursesCustom: {
+  password: '', isProxy: 0, runDurationMinutes: 0, informEmails: [], coursesCustom: {
     shuffleSw: 0, videoModel: 1, autoExam: 0, examAutoSubmit: 1,
     includeCourses: [], excludeCourses: [],
   },
@@ -134,7 +134,7 @@ export default function AccountsPage() {
     setEditing({
       uid: a.uid, accountType: a.accountType, url: a.url,
       remarkName: a.remarkName ?? '', account: a.account,
-      password: '', isProxy: a.isProxy, informEmails: a.informEmails,
+      password: '', isProxy: a.isProxy, runDurationMinutes: a.runDurationMinutes ?? 0, informEmails: a.informEmails,
       coursesCustom: { ...cc, videoModel: fixedModel },
     })
   }
@@ -177,7 +177,7 @@ export default function AccountsPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>{'平台'}</th><th>{'账号'}</th><th>{'备注'}</th><th>{'代理'}</th><th>{'GUI 支持'}</th><th>{'操作'}</th>
+<th>{'平台'}</th><th>{'账号'}</th><th>{'备注'}</th><th>{'代理'}</th><th>{'任务定时'}</th><th>{'GUI 支持'}</th><th>{'操作'}</th>
               </tr>
             </thead>
             <tbody>
@@ -187,6 +187,7 @@ export default function AccountsPage() {
                   <td style={{ fontWeight: 500 }}>{a.account}</td>
                   <td className="text-muted">{a.remarkName || '—'}</td>
                   <td className="text-muted">{a.isProxy ? '是' : '否'}</td>
+                  <td className="text-muted">{a.runDurationMinutes > 0 ? `${a.runDurationMinutes} 分钟` : '不限时'}</td>
                   <td>{guiBadge(a.guiSupport)}</td>
                   <td>
                     <div className="flex-row">
@@ -203,7 +204,7 @@ export default function AccountsPage() {
                 </tr>
               ))}
               {(accounts ?? []).length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '32px 24px', color: 'var(--text3)' }}>
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: '32px 24px', color: 'var(--text3)' }}>
                   {'暂无账号，点击"添加账号"开始'}
                 </td></tr>
               )}
@@ -337,6 +338,14 @@ function AccountModal({ req, onChange, onSave, onClose, saving, error }: {
                 options={[{ value: 0, label: '否' }, { value: 1, label: '是' }]}
                 onChange={v => set('isProxy', Number(v))}
               />
+            </FormGroup>
+            <FormGroup label="任务定时">
+              <input className="form-input" type="number" min={0} step={1}
+                value={req.runDurationMinutes ?? 0}
+                onChange={e => {
+                  const n = Number(e.target.value)
+                  set('runDurationMinutes', Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0)
+                }} />
             </FormGroup>
           </div>
           <FormGroup label="通知邮箱（多个用英文逗号分隔）">

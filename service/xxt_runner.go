@@ -35,6 +35,164 @@ import (
 // emit 是日志回调，用 printf 格式
 type emitFn func(format string, args ...interface{})
 
+// xxtSubmitMaxRetries limits transparent refresh/re-submit attempts.  The
+// Chaoxing endpoint may return HTTP 200 with a JSON status:false when the
+// first page context (enc/answerId) is stale, so callers must inspect the
+// response body instead of relying on the Go error alone.
+const xxtSubmitMaxRetries = 2
+
+func isXXTCaptchaError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(strings.TrimSpace(err.Error()))
+	for _, marker := range []string{"滑块", "验证码", "captcha", "captcha pass failed", "verification code"} {
+		if strings.Contains(s, strings.ToLower(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+// xxtSubmitResponseFailed recognises the response forms used by the desktop
+// and mobile Chaoxing APIs.  A failed save/submit is commonly returned as a
+// normal string with status:false, therefore checking only err is insufficient.
+func xxtSubmitResponseFailed(raw string) bool {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return true
+	}
+	var obj map[string]interface{}
+	if json.Unmarshal([]byte(s), &obj) == nil {
+		for _, key := range []string{"status", "success", "result"} {
+			if v, ok := obj[key]; ok {
+				switch b := v.(type) {
+				case bool:
+					if !b {
+						return true
+					}
+				case string:
+					v := strings.TrimSpace(b)
+					if strings.EqualFold(v, "false") || strings.EqualFold(v, "fail") || v == "0" {
+						return true
+					}
+				case float64:
+					if b == 0 {
+						return true
+					}
+				}
+			}
+		}
+	}
+	lower := strings.ToLower(s)
+	for _, marker := range []string{"enc error", "submit error", "save error", "提交失败", "保存失败", "答题失败", "操作失败", "失败"} {
+		if strings.Contains(lower, strings.ToLower(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+func copyWorkQuestionAnswer(dst *xuexitong.XXTWorkQuestion, src xuexitong.XXTWorkQuestion) {
+	dst.Question.Answers = append(dst.Question.Answers[:0], src.Question.Answers...)
+}
+
+func copyExamQuestionAnswer(dst *xuexitong.XXTExamQuestion, src xuexitong.XXTExamQuestion) {
+	dst.Question.Answers = append(dst.Question.Answers[:0], src.Question.Answers...)
+}
+
+func cloneXXTAnswerMap(src map[string][]string) map[string][]string {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string][]string, len(src))
+	for k, v := range src {
+		dst[k] = append([]string(nil), v...)
+	}
+	return dst
+}
+
+// copyChapterQuestionAnswers copies only answers, preserving fresh request
+// metadata (job/enc/answer IDs) obtained by ParseWorkQuestionAction.
+func copyChapterQuestionAnswers(dst, src *xuexitongApi.Question) {
+	if dst == nil || src == nil {
+		return
+	}
+	choice := make(map[string][]string, len(src.Choice))
+	for _, q := range src.Choice {
+		choice[q.Qid] = append([]string(nil), q.Answers...)
+	}
+	for i := range dst.Choice {
+		if a, ok := choice[dst.Choice[i].Qid]; ok {
+			dst.Choice[i].Answers = append([]string(nil), a...)
+		}
+	}
+	judge := make(map[string][]string, len(src.Judge))
+	for _, q := range src.Judge {
+		judge[q.Qid] = append([]string(nil), q.Answers...)
+	}
+	for i := range dst.Judge {
+		if a, ok := judge[dst.Judge[i].Qid]; ok {
+			dst.Judge[i].Answers = append([]string(nil), a...)
+		}
+	}
+	fill := make(map[string][]string, len(src.Fill))
+	for _, q := range src.Fill {
+		fill[q.Qid] = append([]string(nil), q.OpFromAnswer...)
+	}
+	for i := range dst.Fill {
+		if a, ok := fill[dst.Fill[i].Qid]; ok {
+			dst.Fill[i].OpFromAnswer = append([]string(nil), a...)
+		}
+	}
+	short := make(map[string]map[string][]string, len(src.Short))
+	for _, q := range src.Short {
+		short[q.Qid] = cloneXXTAnswerMap(q.OpFromAnswer)
+	}
+	for i := range dst.Short {
+		if a, ok := short[dst.Short[i].Qid]; ok {
+			dst.Short[i].OpFromAnswer = a
+		}
+	}
+	term := make(map[string]map[string][]string, len(src.TermExplanation))
+	for _, q := range src.TermExplanation {
+		term[q.Qid] = cloneXXTAnswerMap(q.OpFromAnswer)
+	}
+	for i := range dst.TermExplanation {
+		if a, ok := term[dst.TermExplanation[i].Qid]; ok {
+			dst.TermExplanation[i].OpFromAnswer = a
+		}
+	}
+	essay := make(map[string]map[string][]string, len(src.Essay))
+	for _, q := range src.Essay {
+		answers := cloneXXTAnswerMap(q.OpFromAnswer)
+		essay[q.Qid] = answers
+	}
+	for i := range dst.Essay {
+		if a, ok := essay[dst.Essay[i].Qid]; ok {
+			dst.Essay[i].OpFromAnswer = a
+		}
+	}
+	matching := make(map[string][]string, len(src.Matching))
+	for _, q := range src.Matching {
+		matching[q.Qid] = append([]string(nil), q.Answers...)
+	}
+	for i := range dst.Matching {
+		if a, ok := matching[dst.Matching[i].Qid]; ok {
+			dst.Matching[i].Answers = append([]string(nil), a...)
+		}
+	}
+	other := make(map[string]map[string][]string, len(src.Other))
+	for _, q := range src.Other {
+		other[q.Qid] = cloneXXTAnswerMap(q.OpFromAnswer)
+	}
+	for i := range dst.Other {
+		if a, ok := other[dst.Other[i].Qid]; ok {
+			dst.Other[i].OpFromAnswer = a
+		}
+	}
+}
+
 type XXTExamOptions struct {
 	SubmitThreshold    int
 	RandomAnswerOnFail int
@@ -515,7 +673,7 @@ func safeRunNode(ctx context.Context, setting consoleConfig.Setting,
 			if hasQ == 0 {
 				continue
 			}
-			safeChapterTestAction(ctx, setting, user, cache, course, curKnowledge, qa, submitThreshold, randomAnswerOnFail, emit)
+			safeChapterTestAction(ctx, setting, user, cache, course, curKnowledge, &wd, qa, submitThreshold, randomAnswerOnFail, emit)
 		}
 	}
 
@@ -683,7 +841,7 @@ func safeRunWorkAndExam(ctx context.Context, setting consoleConfig.Setting,
 					xlog(exam.Name, "enter exam failed: "+err2.Error())
 					continue
 				}
-				safeExamAction(ctx, setting, user, cache, course, exam, examOptions, emit)
+				safeExamAction(ctx, setting, user, cache, course, exam, examCode, examOptions, emit)
 			}
 		}
 	}
@@ -727,13 +885,35 @@ func safeWorkAction(ctx context.Context, setting consoleConfig.Setting,
 		} else {
 			xlog(fmt.Sprintf("第 %d 题提交成功: %s", i+1, result))
 		}
+		for retry := 1; retry <= xxtSubmitMaxRetries && (err != nil || xxtSubmitResponseFailed(result)); retry++ {
+			if ctx.Err() != nil {
+				return
+			}
+			if refreshErr := xuexitong.EnterWorkAction(cache, &work); refreshErr != nil {
+				xlog(fmt.Sprintf("第 %d 次刷新作业上下文失败：%s", retry, refreshErr.Error()))
+				break
+			}
+			fresh, pullErr := work.PullWorkQuestionAction(cache, i)
+			if pullErr != nil {
+				xlog(fmt.Sprintf("第 %d 次刷新作业题目失败：%s", retry, pullErr.Error()))
+				break
+			}
+			copyWorkQuestionAnswer(&fresh, question)
+			question = fresh
+			result, err = question.SubmitWorkAnswerAction(cache, shouldSubmit)
+			if err != nil {
+				xlog(fmt.Sprintf("第 %d 次作业提交重试失败：%s", retry, err.Error()))
+			} else {
+				xlog(fmt.Sprintf("第 %d 次作业提交重试返回：%s", retry, result))
+			}
+		}
 	}
 	xlog("作业完成")
 }
 
 func safeExamAction(ctx context.Context, setting consoleConfig.Setting,
 	user *consoleConfig.User, cache *xuexitongApi.XueXiTUserCache,
-	course *xuexitong.XueXiTCourse, exam xuexitong.XXTExam, examOptions XXTExamOptions, emit emitFn) {
+	course *xuexitong.XueXiTCourse, exam xuexitong.XXTExam, examCode string, examOptions XXTExamOptions, emit emitFn) {
 	xlog := func(msg string) {
 		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", exam.Name, msg))
 	}
@@ -768,6 +948,36 @@ func safeExamAction(ctx context.Context, setting consoleConfig.Setting,
 			xlog("考试答案提交失败: " + err.Error())
 		} else {
 			xlog(fmt.Sprintf("第 %d 题提交: %s", i+1, result))
+		}
+		for retry := 1; retry <= xxtSubmitMaxRetries && (err != nil || xxtSubmitResponseFailed(result)); retry++ {
+			if ctx.Err() != nil {
+				return
+			}
+			var refreshErr error
+			if strings.TrimSpace(examCode) != "" {
+				refreshErr = xxtEnterExamWithCodeDirect(cache, &exam, examCode, func(item, msg string) {
+					xlog(msg)
+				})
+			} else {
+				refreshErr = xuexitong.EnterExamAction(cache, &exam)
+			}
+			if refreshErr != nil {
+				xlog(fmt.Sprintf("第 %d 次刷新考试上下文失败：%s", retry, refreshErr.Error()))
+				break
+			}
+			fresh, pullErr := exam.PullExamQuestionAction(cache, i)
+			if pullErr != nil {
+				xlog(fmt.Sprintf("第 %d 次刷新考试题目失败：%s", retry, pullErr.Error()))
+				break
+			}
+			copyExamQuestionAnswer(&fresh, question)
+			question = fresh
+			result, err = question.SubmitExamAnswerAction(cache, shouldSubmit)
+			if err != nil {
+				xlog(fmt.Sprintf("第 %d 次考试提交重试失败：%s", retry, err.Error()))
+			} else {
+				xlog(fmt.Sprintf("第 %d 次考试提交重试返回：%s", retry, result))
+			}
 		}
 	}
 	xlog("考试完成")
@@ -1131,6 +1341,10 @@ func enterXXTExamWithCode(cache *xuexitongApi.XueXiTUserCache, exam *xuexitong.X
 	}
 	err := xuexitong.EnterExamAction(cache, exam)
 	if err != nil {
+		if isXXTCaptchaError(err) {
+			xlog(exam.Name, "exam slider/captcha verification failed; do not treat it as an exam code request")
+			return err
+		}
 		if strings.TrimSpace(examCode) == "" {
 			xlog(exam.Name, "exam needs code, waiting for user input")
 			if code, waitErr := WaitForXXTExamCode(opts.AccountUID, opts.AccountName, exam.Name, exam.TaskRefId, 10*time.Minute); waitErr == nil && strings.TrimSpace(code) != "" {
@@ -1609,7 +1823,7 @@ func normalizeJudgeAnswers(answers []string, pfx func(string)) []string {
 // safeChapterTestAction 安全版章节测验答题
 func safeChapterTestAction(ctx context.Context, setting consoleConfig.Setting,
 	user *consoleConfig.User, cache *xuexitongApi.XueXiTUserCache,
-	course *xuexitong.XueXiTCourse, knowledge xuexitong.KnowledgeItem,
+	course *xuexitong.XueXiTCourse, knowledge xuexitong.KnowledgeItem, workPoint *xuexitongApi.PointWorkDto,
 	qa xuexitongApi.Question, submitThreshold int, randomAnswerOnFail int, emit emitFn) {
 
 	ai := setting.AiSetting
@@ -1939,6 +2153,7 @@ func safeChapterTestAction(ctx context.Context, setting consoleConfig.Setting,
 	if tokenBad || answered == 0 {
 		pfx(fmt.Sprintf("AI 不可用或无有效答题（answered=%d tokenBad=%v），已禁止提交，仅保存", answered, tokenBad))
 		resultStr, _ = xuexitong.WorkNewSubmitAnswerAction(cache, qa, false)
+		shouldSubmit = false
 	} else {
 		switch user.CoursesCustom.ExamAutoSubmit {
 		case 0:
@@ -1959,14 +2174,29 @@ func safeChapterTestAction(ctx context.Context, setting consoleConfig.Setting,
 		}
 		resultStr, _ = xuexitong.WorkNewSubmitAnswerAction(cache, qa, shouldSubmit)
 	}
-
-	statusOK := false
-	if v := gojsonq.New().JSONString(resultStr).Find("status"); v != nil {
-		if b, ok := v.(bool); ok {
-			statusOK = b
+	// The mobile endpoint may return status:false/enc error while the Go call
+	// itself succeeds. Refresh the question metadata and retry without invoking
+	// AI again, preserving the answers already produced above.
+	for retry := 1; retry <= xxtSubmitMaxRetries && xxtSubmitResponseFailed(resultStr) && workPoint != nil; retry++ {
+		if ctx.Err() != nil {
+			return
+		}
+		fresh, err := xuexitong.ParseWorkQuestionAction(cache, workPoint)
+		if err != nil {
+			pfx(fmt.Sprintf("第 %d 次刷新章节测验上下文失败：%s", retry, err.Error()))
+			break
+		}
+		copyChapterQuestionAnswers(&fresh, &qa)
+		qa = fresh
+		resultStr, err = xuexitong.WorkNewSubmitAnswerAction(cache, qa, shouldSubmit)
+		if err != nil {
+			pfx(fmt.Sprintf("第 %d 次章节测验提交请求失败：%s", retry, err.Error()))
+		} else {
+			pfx(fmt.Sprintf("第 %d 次章节测验提交重试返回：%s", retry, resultStr))
 		}
 	}
-	if statusOK {
+
+	if !xxtSubmitResponseFailed(resultStr) {
 		pfx("章节作业答题完毕，服务器返回：" + resultStr)
 	} else {
 		pfx("章节作业答题保存/提交失败，服务器返回：" + resultStr)

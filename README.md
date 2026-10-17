@@ -12,11 +12,13 @@ Yatori Go Desktop 是基于 [yatori-dev/yatori-go-console](https://github.com/ya
 
 ## 当前版本
 
-v0.4.0
+v0.4.1
 
-## v0.4.0 更新重点
+## v0.4.1 更新重点
 
-- 同步上游 yatori-go-core、桌面应用、前端版本、Docker label、Windows 安装包和 GitHub Release 到 v0.4.0。
+- 新增账号独立任务定时，到达设定时长后仅停止对应账号的任务。
+- 作业、章节测试和考试提交失败时刷新上下文并复用已生成答案重试。
+- 桌面应用、前端、移动核心、Docker label 和发布产物统一到 v0.4.1。
 - 新增 `mobilecore` Android 核心产物发布流程，桌面仓库继续作为唯一业务核心仓库。
 - 新增 `api-schema.json`、`yatori-core-version.json` 和 `yatori-mobilecore-checksums.json`，方便 Android 仓库校验 AAR 版本和完整性。
 - 补齐 Android 需要的配置导入、账号数据库导入/导出、仪表盘账号统计等桥接能力。
@@ -117,13 +119,13 @@ wails build -platform windows/amd64 -o yatori-go-desktop.exe
 Android 版不重复维护平台业务逻辑，只消费桌面仓库发布的 `mobilecore` 产物。
 
 ```powershell
-.\scripts\build-mobilecore.ps1 -Version 0.4.0 -Target android/arm64 -ApiSchemaVersion 1
+.\scripts\build-mobilecore.ps1 -Version 0.4.1 -Target android/arm64 -ApiSchemaVersion 1
 ```
 
 产物默认输出到 `release/`：
 
 ```text
-yatori-mobile-v0.4.0.aar
+yatori-mobile-v0.4.1.aar
 api-schema.json
 yatori-core-version.json
 yatori-mobilecore-checksums.json
@@ -148,7 +150,7 @@ yatori-mobilecore-checksums.json
 
 ## 更新日志
 
-见 [CHANGELOG.md](./CHANGELOG.md) 或 [Releases](https://github.com/yuanglove/yatori-go-desktop/releases)。
+见 [CHANGELOG.md](./CHANGELOG.md) 或 [Releases](https://github.com/yuanycr/yatori-go-desktop/releases)。
 
 ## 致谢
 

@@ -37,11 +37,13 @@ type TaskStatus struct {
 }
 
 type taskEntry struct {
-	mu      sync.Mutex
-	status  TaskStatus
-	cmd     *exec.Cmd
-	stopped bool
-	logDone chan struct{}
+	mu              sync.Mutex
+	status          TaskStatus
+	cmd             *exec.Cmd
+	stopped         bool
+	logDone         chan struct{}
+	timer           *time.Timer
+	timerGeneration uint64
 }
 
 type LogEmitter func(uid, msg string)
@@ -140,6 +142,9 @@ func (m *TaskManager) Start(uid string) error {
 		logDone: make(chan struct{}),
 	}
 	m.tasks[uid] = e
+	if po.RunDurationMinutes > 0 {
+		m.scheduleRunDurationLocked(uid, e, po.RunDurationMinutes)
+	}
 
 	if m.emitter != nil {
 		m.emitter(uid, sysLog("worker 并发：当前 %d/%d", running+1, m.maxWorkers))
@@ -152,10 +157,18 @@ func (m *TaskManager) Start(uid string) error {
 		m.mu.RLock()
 		entry, ok := m.tasks[uid]
 		m.mu.RUnlock()
-		if ok {
+		// A stopped task may be started again before the old worker exits. Only
+		// update the entry belonging to this worker; never mark the new run as
+		// stopped or cancel its timer.
+		if ok && entry == e {
 			entry.mu.Lock()
 			if entry.status.State == StateRunning {
 				entry.status.State = StateStopped
+			}
+			entry.timerGeneration++
+			if entry.timer != nil {
+				entry.timer.Stop()
+				entry.timer = nil
 			}
 			entry.mu.Unlock()
 		}
@@ -171,23 +184,54 @@ func (m *TaskManager) Stop(uid string) {
 	if !ok {
 		return
 	}
+	m.stopEntry(uid, e)
+}
+
+// stopEntry stops e only if it is still the current task for uid. The identity
+// check prevents a timer/old worker from stopping a newer run after a restart.
+func (m *TaskManager) stopEntry(uid string, e *taskEntry) {
+	m.stopEntryAtGeneration(uid, e, 0, false)
+}
+
+// stopEntryAtGeneration is used by timer callbacks. The generation check is
+// performed while holding e.mu, so a concurrent duration update cannot race
+// between callback validation and killing the task.
+func (m *TaskManager) stopEntryAtGeneration(uid string, e *taskEntry, generation uint64, checkGeneration bool) {
+	m.mu.RLock()
+	current, ok := m.tasks[uid]
+	m.mu.RUnlock()
+	if !ok || current != e {
+		return
+	}
 
 	e.mu.Lock()
+	if checkGeneration && e.timerGeneration != generation {
+		e.mu.Unlock()
+		return
+	}
 	if e.stopped {
 		e.mu.Unlock()
 		return
 	}
 	e.stopped = true
+	e.timerGeneration++
+	timer := e.timer
+	e.timer = nil
 	pid := 0
 	if e.cmd != nil && e.cmd.Process != nil {
 		pid = e.cmd.Process.Pid
 	}
 	e.mu.Unlock()
+	if timer != nil {
+		timer.Stop()
+	}
 
-	select {
-	case <-e.logDone:
-	default:
-		close(e.logDone)
+	if e.logDone != nil {
+		select {
+		case <-e.logDone:
+		default:
+			close(e.logDone)
+		}
 	}
 
 	if pid > 0 {
@@ -208,6 +252,71 @@ func (m *TaskManager) Stop(uid string) {
 	if m.emitter != nil {
 		m.emitter(uid, sysLog("已强制停止任务 pid=%d", pid))
 	}
+}
+
+// SetRunDuration updates the automatic stop timer for an already running
+// account. A value of zero disables the timer. It is intentionally scoped to
+// the account's current task and does not affect any other account.
+func (m *TaskManager) SetRunDuration(uid string, minutes int) error {
+	if minutes < 0 {
+		return fmt.Errorf("运行时长不能为负数")
+	}
+	m.mu.RLock()
+	e, ok := m.tasks[uid]
+	m.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	e.mu.Lock()
+	e.timerGeneration++
+	gen := e.timerGeneration
+	old := e.timer
+	e.timer = nil
+	running := e.status.State == StateRunning && !e.stopped
+	if running && minutes > 0 {
+		e.timer = time.AfterFunc(time.Duration(minutes)*time.Minute, func() {
+			m.autoStop(uid, e, gen, minutes)
+		})
+	}
+	e.mu.Unlock()
+	if old != nil {
+		old.Stop()
+	}
+	return nil
+}
+
+// scheduleRunDurationLocked schedules the timer for a freshly-created entry.
+// m.mu must be held by the caller; e.mu is acquired here.
+func (m *TaskManager) scheduleRunDurationLocked(uid string, e *taskEntry, minutes int) {
+	if minutes <= 0 {
+		return
+	}
+	e.mu.Lock()
+	e.timerGeneration++
+	gen := e.timerGeneration
+	e.timer = time.AfterFunc(time.Duration(minutes)*time.Minute, func() {
+		m.autoStop(uid, e, gen, minutes)
+	})
+	e.mu.Unlock()
+}
+
+func (m *TaskManager) autoStop(uid string, e *taskEntry, generation uint64, minutes int) {
+	m.mu.RLock()
+	current, ok := m.tasks[uid]
+	m.mu.RUnlock()
+	if !ok || current != e {
+		return
+	}
+	e.mu.Lock()
+	valid := e.timerGeneration == generation && e.status.State == StateRunning && !e.stopped
+	e.mu.Unlock()
+	if !valid {
+		return
+	}
+	if m.emitter != nil {
+		m.emitter(uid, sysLog("账号运行时长已到，自动停止任务（%d 分钟）", minutes))
+	}
+	m.stopEntryAtGeneration(uid, e, generation, true)
 }
 
 func (m *TaskManager) StopAll() {
