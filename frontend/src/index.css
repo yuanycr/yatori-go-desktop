@@ -697,6 +697,18 @@ html[data-theme="graphite"] body::after {
 .log-WARN  { color: var(--warn); }
 .log-ERROR { color: var(--danger); font-weight: 500; }
 
+.log-center-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.log-center-page > .log-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
 /* ── Alerts ── */
 .alert {
   display: block;
@@ -1361,5 +1373,108 @@ button:hover .announce-bell {
   .animated-select-chevron { animation: none !important; transition-duration: 0.01ms !important; }
 }
 
-/* Compatible with Android WebView versions without dvh support. */
-@media(max-width:760px){.log-area{height:340px;max-height:340px;min-height:0;overflow-y:auto;overflow-x:hidden;flex:0 0 auto}.log-center-area.log-area{height:calc(100vh - 280px);max-height:calc(100vh - 280px);min-height:180px}}
+/* Keep dashboard logs bounded; only the dedicated log center fills the page. */
+@media(max-width:760px){
+  .log-area{height:340px;max-height:340px;min-height:0;overflow-y:auto;overflow-x:hidden;flex:0 0 auto}
+  .log-center-page > .log-area{height:calc(100vh - 280px);max-height:none;min-height:180px;flex:1 1 auto}
+  .table td{border-bottom:1px solid var(--border2)}
+  .table td:last-child{border-bottom:none}
+}
+
+/* Phone layout: keep the content full width and move navigation out of the desktop sidebar. */
+@media (max-width: 760px) {
+  #root {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+  }
+
+  .layout {
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .nav {
+    order: 2;
+    width: 100%;
+    height: auto;
+    flex: 0 0 auto;
+    border-right: 0;
+    border-top: 1px solid var(--glass-border);
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, .16);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .nav-logo,
+  .nav-footer {
+    display: none;
+  }
+
+  .nav-links {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 5px 6px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-link {
+    flex: 0 0 auto;
+    min-width: 54px;
+    min-height: 48px;
+    margin: 0;
+    padding: 5px 8px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    font-size: 10px;
+    line-height: 1.2;
+    scroll-snap-align: center;
+  }
+
+  .nav-link.active::before {
+    left: 15%;
+    top: 0;
+    width: 70%;
+    height: 2px;
+    border-radius: 0 0 2px 2px;
+  }
+
+  .nav-icon {
+    display: grid;
+    place-items: center;
+    width: auto;
+  }
+
+  .main {
+    order: 1;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-x: hidden;
+    overscroll-behavior-y: contain;
+  }
+
+  .page {
+    min-width: 0;
+    padding: 16px 14px;
+  }
+
+  .page-title {
+    margin-bottom: 14px;
+  }
+
+  .table {
+    min-width: 680px;
+  }
+}

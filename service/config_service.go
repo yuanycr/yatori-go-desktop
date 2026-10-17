@@ -158,6 +158,7 @@ func defaultConfig() AppConfig {
 	return AppConfig{
 		Setting: Setting{
 			BasicSetting: BasicSetting{
+				MaxWorkers:     3,
 				CompletionTone: 1,
 				ColorLog:       1,
 				LogOutFileSw:   1,
@@ -172,6 +173,11 @@ func defaultConfig() AppConfig {
 }
 
 func applyDefaults(cfg *AppConfig) {
+	// Older config files (including Android v0.4.0 data) may omit maxWorkers.
+	// Keep the runtime limit usable instead of allowing a zero-worker state.
+	if cfg.Setting.BasicSetting.MaxWorkers <= 0 {
+		cfg.Setting.BasicSetting.MaxWorkers = 3
+	}
 	if cfg.Setting.BasicSetting.LogLevel == "" {
 		cfg.Setting.BasicSetting.LogLevel = "INFO"
 	}

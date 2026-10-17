@@ -222,6 +222,13 @@ func (a *App) UpdateAccount(req service.AccountReq) BoolResult {
 	if err := service.UpdateAccount(req); err != nil {
 		return BoolResult{Error: err.Error()}
 	}
+	// Apply a changed duration immediately when this account is already
+	// running. The timer is scoped to this UID only.
+	if a.taskMgr != nil {
+		if err := a.taskMgr.SetRunDuration(req.UID, req.RunDurationMinutes); err != nil {
+			return BoolResult{Error: err.Error()}
+		}
+	}
 	return BoolResult{Ok: true}
 }
 
@@ -420,10 +427,10 @@ type githubRelease struct {
 func fetchLatestGitHubRelease() (githubRelease, error) {
 	client := &http.Client{Timeout: 12 * time.Second}
 	var release githubRelease
-	status, err := getJSON(client, "https://api.github.com/repos/yuanglove/yatori-go-desktop/releases/latest", &release)
+	status, err := getJSON(client, "https://api.github.com/repos/yuanycr/yatori-go-desktop/releases/latest", &release)
 	if err == nil && release.TagName != "" {
 		if release.HTMLURL == "" {
-			release.HTMLURL = "https://github.com/yuanglove/yatori-go-desktop/releases"
+		release.HTMLURL = "https://github.com/yuanycr/yatori-go-desktop/releases"
 		}
 		return release, nil
 	}
@@ -434,14 +441,14 @@ func fetchLatestGitHubRelease() (githubRelease, error) {
 	var tags []struct {
 		Name string `json:"name"`
 	}
-	_, err = getJSON(client, "https://api.github.com/repos/yuanglove/yatori-go-desktop/tags", &tags)
+	_, err = getJSON(client, "https://api.github.com/repos/yuanycr/yatori-go-desktop/tags", &tags)
 	if err != nil {
 		return githubRelease{}, err
 	}
 	if len(tags) == 0 || tags[0].Name == "" {
 		return githubRelease{}, fmt.Errorf("GitHub 暂无可用版本标签")
 	}
-	return githubRelease{TagName: tags[0].Name, HTMLURL: "https://github.com/yuanglove/yatori-go-desktop/releases"}, nil
+	return githubRelease{TagName: tags[0].Name, HTMLURL: "https://github.com/yuanycr/yatori-go-desktop/releases"}, nil
 }
 
 func getJSON(client *http.Client, url string, out any) (int, error) {

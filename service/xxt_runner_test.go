@@ -1,6 +1,11 @@
 package service
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	xuexitongApi "github.com/yatori-dev/yatori-go-core/api/xuexitong"
+)
 
 func TestXXTExtractExamJumpURL(t *testing.T) {
 	html := `<input type="hidden" id="examJumpUrl" value="/exam-ans/exam/phone/task-exam?courseId=1&amp;code=t8918554" />`
@@ -39,5 +44,59 @@ func TestXXTExtractExamQuestionTotal(t *testing.T) {
 		if got := xxtExtractExamQuestionTotal(tc.html); got != tc.want {
 			t.Fatalf("got %d want %d for %q", got, tc.want, tc.html)
 		}
+	}
+}
+
+func TestXXTSubmitResponseFailed(t *testing.T) {
+	failed := []string{
+		`{"status":false,"msg":"enc error!"}`,
+		`{"success":false}`,
+		`提交失败，请重试`,
+		`enc error`,
+		``,
+	}
+	for _, raw := range failed {
+		if !xxtSubmitResponseFailed(raw) {
+			t.Errorf("expected failed response: %q", raw)
+		}
+	}
+	passed := []string{`{"status":true}`, `{"success":true,"msg":"ok"}`, `ok`}
+	for _, raw := range passed {
+		if xxtSubmitResponseFailed(raw) {
+			t.Errorf("expected successful response: %q", raw)
+		}
+	}
+}
+
+func TestXXTCaptchaErrorDoesNotLookLikeExamCode(t *testing.T) {
+	if !isXXTCaptchaError(errors.New("考试滑块验证码处理失败")) {
+		t.Fatal("slider failure was not classified as captcha")
+	}
+	if isXXTCaptchaError(errors.New("考试码错误")) {
+		t.Fatal("exam code error was classified as captcha")
+	}
+}
+
+func TestCopyChapterQuestionAnswersKeepsFreshMetadata(t *testing.T) {
+	src := xuexitongApi.Question{
+		JobId:  "old-job",
+		Choice: []xuexitongApi.ChoiceQue{{Qid: "c1", Answers: []string{"A"}}},
+		Fill:   []xuexitongApi.FillQue{{Qid: "f1", OpFromAnswer: []string{"hello"}}},
+	}
+	dst := xuexitongApi.Question{
+		JobId:  "fresh-job",
+		Choice: []xuexitongApi.ChoiceQue{{Qid: "c1"}},
+		Fill:   []xuexitongApi.FillQue{{Qid: "f1"}},
+	}
+	copyChapterQuestionAnswers(&dst, &src)
+	if dst.JobId != "fresh-job" || len(dst.Choice[0].Answers) != 1 || dst.Choice[0].Answers[0] != "A" {
+		t.Fatalf("fresh metadata or choice answer was lost: %+v", dst)
+	}
+	if got := dst.Fill[0].OpFromAnswer; len(got) != 1 || got[0] != "hello" {
+		t.Fatalf("fill answer was not copied: %+v", dst.Fill[0].OpFromAnswer)
+	}
+	src.Choice[0].Answers[0] = "B"
+	if dst.Choice[0].Answers[0] != "A" {
+		t.Fatal("answer copy aliases source slice")
 	}
 }

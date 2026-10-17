@@ -31,7 +31,7 @@ export interface CoursesCustom {
 }
 export interface AccountVO {
   uid: string; accountType: string; url: string; remarkName?: string
-  account: string; isProxy: number; isRunning: boolean
+  account: string; isProxy: number; runDurationMinutes: number; isRunning: boolean
   guiSupport: 'full' | 'config-only' | 'none'
   coursesCustom: CoursesCustom; informEmails: string[]
 }

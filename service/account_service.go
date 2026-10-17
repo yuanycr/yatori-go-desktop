@@ -46,16 +46,17 @@ func ListAccounts(mgr *TaskManager) ([]AccountVO, error) {
 			emails = []string{}
 		}
 		out = append(out, AccountVO{
-			UID:           r.UID,
-			AccountType:   r.AccountType,
-			URL:           r.URL,
-			RemarkName:    r.RemarkName,
-			Account:       r.Account,
-			IsProxy:       r.IsProxy,
-			IsRunning:     mgr.IsRunning(r.UID),
-			GUISupport:    supports[r.AccountType],
-			CoursesCustom: cc,
-			InformEmails:  emails,
+			UID:                r.UID,
+			AccountType:        r.AccountType,
+			URL:                r.URL,
+			RemarkName:         r.RemarkName,
+			Account:            r.Account,
+			IsProxy:            r.IsProxy,
+			RunDurationMinutes: r.RunDurationMinutes,
+			IsRunning:          mgr.IsRunning(r.UID),
+			GUISupport:         supports[r.AccountType],
+			CoursesCustom:      cc,
+			InformEmails:       emails,
 		})
 	}
 	return out, nil
@@ -87,6 +88,9 @@ func AddAccount(req AccountReq) error {
 	if req.Password == "" {
 		return fmt.Errorf("密码不能为空")
 	}
+	if req.RunDurationMinutes < 0 {
+		return fmt.Errorf("运行时长不能为负数")
+	}
 	if err := checkDuplicateAccount(req); err != nil {
 		return err
 	}
@@ -95,15 +99,16 @@ func AddAccount(req AccountReq) error {
 	ccJSON, _ := json.Marshal(req.CoursesCustom)
 	emailsJSON, _ := json.Marshal(req.InformEmails)
 	row := AccountPO{
-		UID:           uid.String(),
-		AccountType:   req.AccountType,
-		URL:           req.URL,
-		RemarkName:    req.RemarkName,
-		Account:       req.Account,
-		PasswordEnc:   encodePassword(req.Password),
-		IsProxy:       req.IsProxy,
-		InformEmails:  string(emailsJSON),
-		CoursesCustom: string(ccJSON),
+		UID:                uid.String(),
+		AccountType:        req.AccountType,
+		URL:                req.URL,
+		RemarkName:         req.RemarkName,
+		Account:            req.Account,
+		PasswordEnc:        encodePassword(req.Password),
+		IsProxy:            req.IsProxy,
+		RunDurationMinutes: req.RunDurationMinutes,
+		InformEmails:       string(emailsJSON),
+		CoursesCustom:      string(ccJSON),
 	}
 	return db.Create(&row).Error
 }
@@ -118,16 +123,20 @@ func UpdateAccount(req AccountReq) error {
 	if req.Account == "" || req.AccountType == "" {
 		return fmt.Errorf("账号和平台类型不能为空")
 	}
+	if req.RunDurationMinutes < 0 {
+		return fmt.Errorf("运行时长不能为负数")
+	}
 	if err := checkDuplicateAccount(req); err != nil {
 		return err
 	}
 	NormalizeCoursesCustom(req.AccountType, &req.CoursesCustom)
 	updates := map[string]any{
-		"account_type": req.AccountType,
-		"url":          req.URL,
-		"remark_name":  req.RemarkName,
-		"account":      req.Account,
-		"is_proxy":     req.IsProxy,
+		"account_type":         req.AccountType,
+		"url":                  req.URL,
+		"remark_name":          req.RemarkName,
+		"account":              req.Account,
+		"is_proxy":             req.IsProxy,
+		"run_duration_minutes": req.RunDurationMinutes,
 	}
 	if req.Password != "" {
 		updates["password_enc"] = encodePassword(req.Password)
@@ -184,14 +193,15 @@ func ImportAccountPOs(rows []AccountPO) (AccountImportSummary, error) {
 			return summary, err
 		}
 		if err := db.Model(&AccountPO{}).Where("uid = ?", row.UID).Updates(map[string]any{
-			"account_type":   row.AccountType,
-			"url":            row.URL,
-			"remark_name":    row.RemarkName,
-			"account":        row.Account,
-			"password_enc":   row.PasswordEnc,
-			"is_proxy":       row.IsProxy,
-			"inform_emails":  row.InformEmails,
-			"courses_custom": row.CoursesCustom,
+			"account_type":         row.AccountType,
+			"url":                  row.URL,
+			"remark_name":          row.RemarkName,
+			"account":              row.Account,
+			"password_enc":         row.PasswordEnc,
+			"is_proxy":             row.IsProxy,
+			"run_duration_minutes": row.RunDurationMinutes,
+			"inform_emails":        row.InformEmails,
+			"courses_custom":       row.CoursesCustom,
 		}).Error; err != nil {
 			return summary, err
 		}

@@ -36,40 +36,45 @@ func InitDB() error {
 }
 
 type AccountPO struct {
-	UID           string `gorm:"primaryKey"`
-	AccountType   string
-	URL           string
-	RemarkName    string
-	Account       string
-	PasswordEnc   string
-	IsProxy       int
-	InformEmails  string
-	CoursesCustom string
+	UID         string `gorm:"primaryKey"`
+	AccountType string
+	URL         string
+	RemarkName  string
+	Account     string
+	PasswordEnc string
+	IsProxy     int
+	// RunDurationMinutes controls the per-account automatic stop timer.
+	// Zero means unlimited (no automatic stop).
+	RunDurationMinutes int
+	InformEmails       string
+	CoursesCustom      string
 }
 
 type AccountVO struct {
-	UID           string        `json:"uid"`
-	AccountType   string        `json:"accountType"`
-	URL           string        `json:"url"`
-	RemarkName    string        `json:"remarkName"`
-	Account       string        `json:"account"`
-	IsProxy       int           `json:"isProxy"`
-	IsRunning     bool          `json:"isRunning"`
-	GUISupport    string        `json:"guiSupport"`
-	CoursesCustom CoursesCustom `json:"coursesCustom"`
-	InformEmails  []string      `json:"informEmails"`
+	UID                string        `json:"uid"`
+	AccountType        string        `json:"accountType"`
+	URL                string        `json:"url"`
+	RemarkName         string        `json:"remarkName"`
+	Account            string        `json:"account"`
+	IsProxy            int           `json:"isProxy"`
+	RunDurationMinutes int           `json:"runDurationMinutes"`
+	IsRunning          bool          `json:"isRunning"`
+	GUISupport         string        `json:"guiSupport"`
+	CoursesCustom      CoursesCustom `json:"coursesCustom"`
+	InformEmails       []string      `json:"informEmails"`
 }
 
 type AccountReq struct {
-	UID           string        `json:"uid"`
-	AccountType   string        `json:"accountType"`
-	URL           string        `json:"url"`
-	RemarkName    string        `json:"remarkName"`
-	Account       string        `json:"account"`
-	Password      string        `json:"password"`
-	IsProxy       int           `json:"isProxy"`
-	InformEmails  []string      `json:"informEmails"`
-	CoursesCustom CoursesCustom `json:"coursesCustom"`
+	UID                string        `json:"uid"`
+	AccountType        string        `json:"accountType"`
+	URL                string        `json:"url"`
+	RemarkName         string        `json:"remarkName"`
+	Account            string        `json:"account"`
+	Password           string        `json:"password"`
+	IsProxy            int           `json:"isProxy"`
+	RunDurationMinutes int           `json:"runDurationMinutes"`
+	InformEmails       []string      `json:"informEmails"`
+	CoursesCustom      CoursesCustom `json:"coursesCustom"`
 }
 
 type Dashboard struct {

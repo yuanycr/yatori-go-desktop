@@ -49,6 +49,12 @@ func TestInitAndConfigRoundTrip(t *testing.T) {
 	if !mustOK(Init(dir)) {
 		t.Fatal("Init failed")
 	}
+	state.Lock()
+	gotWorkers := state.maxWorkers
+	state.Unlock()
+	if gotWorkers != desktopMaxConcurrentAccountTasks {
+		t.Fatalf("default maxWorkers = %d, want %d", gotWorkers, desktopMaxConcurrentAccountTasks)
+	}
 	if !mustOK(SaveConfigJSON(`{"setting":{"maxWorkers":3}}`)) {
 		t.Fatal("SaveConfigJSON failed")
 	}

@@ -128,6 +128,42 @@ func TestUpdateAccount_DuplicateSamePlatformSameURL_Blocked(t *testing.T) {
 	}
 }
 
+func TestAccount_RunDurationMinutesPersisted(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	req := baseReq("XUEXITONG", "timer@test.com", "", "pwd")
+	req.RunDurationMinutes = 30
+	if err := AddAccount(req); err != nil {
+		t.Fatalf("add account: %v", err)
+	}
+	accounts, err := ListAccounts(NewTaskManager(nil))
+	if err != nil || len(accounts) != 1 {
+		t.Fatalf("list account: len=%d err=%v", len(accounts), err)
+	}
+	if accounts[0].RunDurationMinutes != 30 {
+		t.Fatalf("duration not returned: got %d", accounts[0].RunDurationMinutes)
+	}
+
+	accounts[0].RunDurationMinutes = 0
+	if err := UpdateAccount(AccountReq{
+		UID:                accounts[0].UID,
+		AccountType:        accounts[0].AccountType,
+		Account:            accounts[0].Account,
+		RunDurationMinutes: 0,
+		CoursesCustom:      accounts[0].CoursesCustom,
+	}); err != nil {
+		t.Fatalf("update duration: %v", err)
+	}
+	po, err := GetAccountPO(accounts[0].UID)
+	if err != nil {
+		t.Fatalf("get account: %v", err)
+	}
+	if po.RunDurationMinutes != 0 {
+		t.Fatalf("duration was not disabled: got %d", po.RunDurationMinutes)
+	}
+}
+
 // 清理：确保测试不会产生文件副作用
 func TestMain(m *testing.M) {
 	code := m.Run()

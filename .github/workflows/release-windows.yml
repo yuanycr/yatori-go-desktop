@@ -6,7 +6,7 @@ on:
       tag:
         description: Release tag to update
         required: true
-        default: v0.4.0
+        default: v0.4.1
 
 permissions:
   contents: write
@@ -43,11 +43,11 @@ jobs:
         run: |
           $env:Path = "C:\msys64\ucrt64\bin;$env:Path"
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-          wails build -s -skipbindings -platform windows/amd64 -o yatori-go-desktop-v0.4.0-windows-amd64.exe
+          wails build -s -skipbindings -platform windows/amd64 -o yatori-go-desktop-v0.4.1-windows-amd64.exe
 
       - name: Replace release asset
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ inputs.tag }}" "build/bin/yatori-go-desktop-v0.4.0-windows-amd64.exe" --clobber --repo "${{ github.repository }}"
+          gh release upload "${{ inputs.tag }}" "build/bin/yatori-go-desktop-v0.4.1-windows-amd64.exe" --clobber --repo "${{ github.repository }}"

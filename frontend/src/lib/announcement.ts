@@ -1,6 +1,6 @@
 // 远程公告拉取与已读管理
 
-export const ANNOUNCEMENT_URL = 'https://raw.githubusercontent.com/yuanglove/yatori-go-desktop/main/announcement.json'
+export const ANNOUNCEMENT_URL = 'https://raw.githubusercontent.com/yuanycr/yatori-go-desktop/main/announcement.json'
 
 const READ_KEY = 'yatori-read-announcement-id'
 const FETCH_TIMEOUT_MS = 6000
@@ -22,7 +22,7 @@ export const DEFAULT_ANNOUNCEMENT: AnnouncementData = {
   level: 'warn',
   enabled: true,
   updatedAt: '2026-06-09 18:00:00',
-  url: 'https://github.com/yuanglove/yatori-go-desktop',
+  url: 'https://github.com/yuanycr/yatori-go-desktop',
 }
 
 function isValidHttpUrl(s: string): boolean {
