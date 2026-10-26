@@ -109,6 +109,7 @@ const emptyReq = (): AccountReq => ({
   uid: '', accountType: 'YINGHUA', url: '', remarkName: '', account: '',
   password: '', isProxy: 0, runDurationMinutes: 0, informEmails: [], coursesCustom: {
     shuffleSw: 0, videoModel: 1, autoExam: 0, examAutoSubmit: 1,
+    cxChapterTestSw: 1, cxWorkSw: 0, cxExamSw: 0,
     includeCourses: [], excludeCourses: [],
   },
 })
@@ -451,14 +452,14 @@ function AccountModal({ req, onChange, onSave, onClose, saving, error }: {
             </FormGroup>
             <FormGroup label="作业（CxWorkSw）">
               <AnimatedSelect
-                value={req.coursesCustom.cxWorkSw ?? 1}
+                value={req.coursesCustom.cxWorkSw ?? 0}
                 options={[{ value: 0, label: '关闭' }, { value: 1, label: '开启' }]}
                 onChange={v => setCC('cxWorkSw', Number(v))}
               />
             </FormGroup>
             <FormGroup label="考试（CxExamSw）">
               <AnimatedSelect
-                value={req.coursesCustom.cxExamSw ?? 1}
+                value={req.coursesCustom.cxExamSw ?? 0}
                 options={[{ value: 0, label: '关闭' }, { value: 1, label: '开启' }]}
                 onChange={v => setCC('cxExamSw', Number(v))}
               />

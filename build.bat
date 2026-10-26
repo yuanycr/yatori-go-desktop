@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM  yatori-go-desktop  Windows 构建脚本
-REM  前提：已安装 Go 1.21+、Wails v2、TDM-GCC 或 MSYS2 mingw64
+REM  前提：Go 版本满足 go.mod（当前 1.27.3+）、Wails v2、TDM-GCC 或 MSYS2 mingw64
 REM ============================================================
 
 echo [1/4] 检查环境...

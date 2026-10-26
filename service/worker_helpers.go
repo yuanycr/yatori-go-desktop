@@ -19,7 +19,7 @@ func buildUser(po AccountPO) consoleConfig.User {
 	pwd := decodePassword(po.PasswordEnc)
 	var cc CoursesCustom
 	_ = json.Unmarshal([]byte(po.CoursesCustom), &cc)
-	one, three := 1, 3
+	one, off, three := 1, 0, 3
 	cxNode := cc.CxNode
 	if cxNode == nil {
 		cxNode = &three
@@ -30,11 +30,11 @@ func buildUser(po AccountPO) consoleConfig.User {
 	}
 	cxWork := cc.CxWorkSw
 	if cxWork == nil {
-		cxWork = &one
+		cxWork = &off
 	}
 	cxExam := cc.CxExamSw
 	if cxExam == nil {
-		cxExam = &one
+		cxExam = &off
 	}
 	return consoleConfig.User{
 		AccountType: po.AccountType, URL: po.URL, RemarkName: po.RemarkName,
@@ -53,7 +53,7 @@ func buildActivity(po AccountPO) consoleActivity.Activity {
 	pwd := decodePassword(po.PasswordEnc)
 	var cc CoursesCustom
 	_ = json.Unmarshal([]byte(po.CoursesCustom), &cc)
-	one, three := 1, 3
+	one, off, three := 1, 0, 3
 	cxNode := cc.CxNode
 	if cxNode == nil {
 		cxNode = &three
@@ -64,11 +64,11 @@ func buildActivity(po AccountPO) consoleActivity.Activity {
 	}
 	cxWork := cc.CxWorkSw
 	if cxWork == nil {
-		cxWork = &one
+		cxWork = &off
 	}
 	cxExam := cc.CxExamSw
 	if cxExam == nil {
-		cxExam = &one
+		cxExam = &off
 	}
 
 	user := consoleConfig.User{

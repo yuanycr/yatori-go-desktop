@@ -6,7 +6,7 @@ on:
       tag:
         description: Release tag to update
         required: true
-        default: v0.4.1
+        default: v0.4.2
 
 permissions:
   contents: write
@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
+          go-version-file: go.mod
 
       - uses: actions/setup-node@v4
         with:
@@ -36,18 +36,36 @@ jobs:
         run: npm --prefix frontend run build
 
       - name: Fetch local core dependency
-        run: git clone --depth 1 https://github.com/yatori-dev/yatori-go-console.git ../yatori-go-console
+        shell: pwsh
+        run: |
+          git init ../yatori-go-console
+          git -C ../yatori-go-console remote add origin https://github.com/yatori-dev/yatori-go-console.git
+          git -C ../yatori-go-console fetch --depth 1 origin b003030ccb53209bf56977596dbc6c0d6cfb71e4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C ../yatori-go-console checkout --detach FETCH_HEAD
+
+      - name: Verify Go toolchain and core
+        shell: pwsh
+        run: |
+          $env:GOTOOLCHAIN = "local"
+          $env:Path = "C:\msys64\ucrt64\bin;$env:Path"
+          go version
+          go mod download
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test ./service/... ./mobilecore/... -count=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Windows x64 executable
         shell: pwsh
         run: |
           $env:Path = "C:\msys64\ucrt64\bin;$env:Path"
+          $env:GOTOOLCHAIN = "local"
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-          wails build -s -skipbindings -platform windows/amd64 -o yatori-go-desktop-v0.4.1-windows-amd64.exe
+          wails build -s -skipbindings -platform windows/amd64 -o yatori-go-desktop-v0.4.2-windows-amd64.exe
 
       - name: Replace release asset
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ inputs.tag }}" "build/bin/yatori-go-desktop-v0.4.1-windows-amd64.exe" --clobber --repo "${{ github.repository }}"
+          gh release upload "${{ inputs.tag }}" "build/bin/yatori-go-desktop-v0.4.2-windows-amd64.exe" --clobber --repo "${{ github.repository }}"

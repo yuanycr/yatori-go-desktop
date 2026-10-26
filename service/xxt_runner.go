@@ -770,8 +770,8 @@ func safeRunWorkAndExam(ctx context.Context, setting consoleConfig.Setting,
 		}
 		return *p
 	}
-	cxWork := getInt(user.CoursesCustom.CxWorkSw, 1)
-	cxExam := getInt(user.CoursesCustom.CxExamSw, 1)
+	cxWork := getInt(user.CoursesCustom.CxWorkSw, 0)
+	cxExam := getInt(user.CoursesCustom.CxExamSw, 0)
 
 	xlog := func(item, msg string) {
 		emit("%s", formatXXTLog("学习通", cache.Name, course.CourseName, "", item, msg))

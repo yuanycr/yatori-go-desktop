@@ -12,17 +12,17 @@ Yatori Go Desktop 是基于 [yatori-dev/yatori-go-console](https://github.com/ya
 
 ## 当前版本
 
-v0.4.1
+v0.4.2
 
-## v0.4.1 更新重点
+## v0.4.2 更新重点
 
-- 新增账号独立任务定时，到达设定时长后仅停止对应账号的任务。
-- 作业、章节测试和考试提交失败时刷新上下文并复用已生成答案重试。
-- 桌面应用、前端、移动核心、Docker label 和发布产物统一到 v0.4.1。
-- 新增 `mobilecore` Android 核心产物发布流程，桌面仓库继续作为唯一业务核心仓库。
-- 新增 `api-schema.json`、`yatori-core-version.json` 和 `yatori-mobilecore-checksums.json`，方便 Android 仓库校验 AAR 版本和完整性。
-- 补齐 Android 需要的配置导入、账号数据库导入/导出、仪表盘账号统计等桥接能力。
-- 更新 README、CHANGELOG 和 mobilecore 发布文档，明确 Android 仓库只负责移动端适配和 APK 发布。
+- 同步上游 `yatori-go-console` 至 `b003030`，核心依赖锁定到 `yatori-go-core` 的 `dca6f5d65861`。
+- 新增账号默认开启章节测试，默认关闭作业、考试；已明确设置的旧账号开关保持不变。
+- 前端、配置归一化和任务执行层使用一致的默认开关，避免界面与实际执行不一致。
+- 标准桌面版和 Android 核心的全局并发账号上限保持为 **5**。
+- 桌面、前端、移动核心和 Android 统一版本为 v0.4.2；记录核心来源与产物 SHA-256。
+- 延续 v0.4.1 的独立任务定时、日志刷新和提交重试能力，本次不重新设计 Android UI。
+- 详细变更及验证边界见 [更新日志](CHANGELOG.md) 和 [v0.4.2 发布说明](docs/v0.4.2-release.md)。
 
 ## 本项目做了什么
 
@@ -104,7 +104,7 @@ yatori-go-desktop/
 
 ## 从源码构建
 
-前置要求：Go 1.22+、Node.js 18+、Windows 可用 GCC、Wails v2。
+前置要求：Go 1.27.3+（与 go.mod 保持一致）、Node.js 18+、Windows 可用 GCC、Wails v2。
 
 ```bat
 cd yatori-go-desktop
@@ -119,13 +119,13 @@ wails build -platform windows/amd64 -o yatori-go-desktop.exe
 Android 版不重复维护平台业务逻辑，只消费桌面仓库发布的 `mobilecore` 产物。
 
 ```powershell
-.\scripts\build-mobilecore.ps1 -Version 0.4.1 -Target android/arm64 -ApiSchemaVersion 1
+.\scripts\build-mobilecore.ps1 -Version 0.4.2 -Target android/arm64 -ApiSchemaVersion 1
 ```
 
 产物默认输出到 `release/`：
 
 ```text
-yatori-mobile-v0.4.1.aar
+yatori-mobile-v0.4.2.aar
 api-schema.json
 yatori-core-version.json
 yatori-mobilecore-checksums.json

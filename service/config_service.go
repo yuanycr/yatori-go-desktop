@@ -231,6 +231,7 @@ func NormalizeCoursesCustom(accountType string, c *CoursesCustom) {
 		return
 	}
 	one := 1
+	off := 0
 	three := 3
 	if c.CxNode == nil {
 		c.CxNode = &three
@@ -239,10 +240,10 @@ func NormalizeCoursesCustom(accountType string, c *CoursesCustom) {
 		c.CxChapterTestSw = &one
 	}
 	if c.CxWorkSw == nil {
-		c.CxWorkSw = &one
+		c.CxWorkSw = &off
 	}
 	if c.CxExamSw == nil {
-		c.CxExamSw = &one
+		c.CxExamSw = &off
 	}
 	if c.IncludeCourses == nil {
 		c.IncludeCourses = []string{}

@@ -12,6 +12,42 @@ func TestValidateConfig_OK(t *testing.T) {
 	}
 }
 
+func TestNormalizeCoursesCustom_DefaultTaskSwitches(t *testing.T) {
+	cc := CoursesCustom{}
+	NormalizeCoursesCustom("XUEXITONG", &cc)
+	if cc.CxChapterTestSw == nil || *cc.CxChapterTestSw != 1 {
+		t.Fatalf("chapter test default = %v, want 1", cc.CxChapterTestSw)
+	}
+	if cc.CxWorkSw == nil || *cc.CxWorkSw != 0 {
+		t.Fatalf("work default = %v, want 0", cc.CxWorkSw)
+	}
+	if cc.CxExamSw == nil || *cc.CxExamSw != 0 {
+		t.Fatalf("exam default = %v, want 0", cc.CxExamSw)
+	}
+}
+
+func TestNormalizeCoursesCustom_PreservesConfiguredTaskSwitches(t *testing.T) {
+	off, on := 0, 1
+	cc := CoursesCustom{CxChapterTestSw: &off, CxWorkSw: &on, CxExamSw: &on}
+	NormalizeCoursesCustom("XUEXITONG", &cc)
+	if *cc.CxChapterTestSw != 0 || *cc.CxWorkSw != 1 || *cc.CxExamSw != 1 {
+		t.Fatalf("normalization changed explicit task switches: chapter=%d work=%d exam=%d", *cc.CxChapterTestSw, *cc.CxWorkSw, *cc.CxExamSw)
+	}
+}
+
+func TestBuildUser_DefaultsMissingTaskSwitches(t *testing.T) {
+	user := buildUser(AccountPO{})
+	if user.CoursesCustom.CxChapterTestSw == nil || *user.CoursesCustom.CxChapterTestSw != 1 {
+		t.Fatalf("worker chapter-test default = %v, want 1", user.CoursesCustom.CxChapterTestSw)
+	}
+	if user.CoursesCustom.CxWorkSw == nil || *user.CoursesCustom.CxWorkSw != 0 {
+		t.Fatalf("worker work default = %v, want 0", user.CoursesCustom.CxWorkSw)
+	}
+	if user.CoursesCustom.CxExamSw == nil || *user.CoursesCustom.CxExamSw != 0 {
+		t.Fatalf("worker exam default = %v, want 0", user.CoursesCustom.CxExamSw)
+	}
+}
+
 func TestValidateConfig_BadLogLevel(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Setting.BasicSetting.LogLevel = "VERBOSE"

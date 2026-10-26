@@ -9,11 +9,11 @@ echo ============================================================
 
 :: [1] Go
 echo.
-echo [1/6] 检查 Go ^>= 1.22 ...
-go version 2>nul | findstr /r "go1\.[2-9][2-9]\|go1\.[3-9]" >nul
+echo [1/6] 检查 go.mod 要求的 Go 工具链（当前 1.27.3+）...
+go version
 if errorlevel 1 (
-    go version 2>nul
-    echo  WARN: 建议 Go 1.22+ 以匹配原项目依赖
+    echo  FAIL: 无法运行 go.mod 要求的 Go 工具链
+    set /a FAIL+=1
 ) else (
     echo  OK
 )

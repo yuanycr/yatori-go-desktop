@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.4.1"
+export const APP_VERSION = "0.4.2"
 export const SOURCE_REPO_URL = "https://github.com/yatori-dev/yatori-go-console"
 export const PROJECT_REPO_URL = "https://github.com/yuanycr/yatori-go-desktop"
 export const PROJECT_RELEASES_URL = "https://github.com/yuanycr/yatori-go-desktop/releases"

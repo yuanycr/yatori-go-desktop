@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	CoreVersion      = "0.4.1"
+	CoreVersion      = "0.4.2"
 	APISchemaVersion = 1
 	// Keep Android account-level concurrency identical to the desktop task manager.
 	desktopMaxConcurrentAccountTasks = 5

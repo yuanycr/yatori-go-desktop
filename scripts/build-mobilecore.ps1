@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.4.1",
+    [string]$Version = "0.4.2",
     [int]$ApiSchemaVersion = 1,
     [int]$AndroidApi = 24,
     [string]$Target = "android/arm64",
@@ -37,9 +37,18 @@ if ([int]$Schema.schemaVersion -ne $ApiSchemaVersion) {
 }
 Copy-Item $SchemaSource $SchemaTarget -Force
 
-$Commit = "unknown"
+$DesktopCommit = "unknown"
 try {
-    $Commit = (git rev-parse --short HEAD).Trim()
+    $DesktopCommit = (git rev-parse --short HEAD).Trim()
+} catch {}
+
+$CoreCommit = "unknown"
+$CoreModuleVersion = "unknown"
+try {
+    $CoreModuleVersion = (& go list -m -f '{{.Version}}' github.com/yatori-dev/yatori-go-core).Trim()
+    if ($LASTEXITCODE -eq 0 -and $CoreModuleVersion -match '-(?<commit>[0-9a-f]{12})$') {
+        $CoreCommit = $Matches.commit
+    }
 } catch {}
 
 $BuiltAt = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -77,7 +86,9 @@ $SchemaSha256 = (Get-FileHash $SchemaTarget -Algorithm SHA256).Hash.ToLowerInvar
 $CoreVersion = [ordered]@{
     androidVersion = $Version
     desktopCoreVersion = $Version
-    coreCommit = $Commit
+    coreCommit = $CoreCommit
+    coreModuleVersion = $CoreModuleVersion
+    desktopCommit = $DesktopCommit
     apiSchemaVersion = $ApiSchemaVersion
     aarFile = $AarName
     aarSha256 = $AarSha256
@@ -97,7 +108,9 @@ $ChecksumFiles["yatori-core-version.json"] = $VersionSha256
 $Checksums = [ordered]@{
     generatedAt = $BuiltAt
     desktopCoreVersion = $Version
-    coreCommit = $Commit
+    coreCommit = $CoreCommit
+    coreModuleVersion = $CoreModuleVersion
+    desktopCommit = $DesktopCommit
     apiSchemaVersion = $ApiSchemaVersion
     files = $ChecksumFiles
 }
