@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/yatori-dev/yatori-go-core/aggregation/yinghua"
 	xuexitongApiPkg "github.com/yatori-dev/yatori-go-core/api/xuexitong"
 	yinghuaApiPkg "github.com/yatori-dev/yatori-go-core/api/yinghua"
 	ctype "github.com/yatori-dev/yatori-go-core/models/ctype"
+	lg "github.com/yatori-dev/yatori-go-core/utils/log"
 	consoleConfig "yatori-go-console/config"
 	"yatori-go-desktop/service"
 )
@@ -91,6 +94,17 @@ func runWorker(uid string) int {
 	}
 	if setting.BasicSetting.LogLevel == "" {
 		setting.BasicSetting.LogLevel = "INFO"
+	}
+	// The desktop owns disk persistence. Enable core diagnostics, but never
+	// create competing per-worker log files (the old logger uses second-only names).
+	// Legacy core's Print uses equality, not a minimum severity: selecting DEBUG
+	// would suppress all INFO business logs. Keep INFO; our worker diagnostics,
+	// stderr and ICVE debug output are captured independently by the parent.
+	lg.LogInit(lg.INFO, false, 0, "")
+	if strings.EqualFold(setting.BasicSetting.LogLevel, "DEBUG") {
+		_ = os.Setenv("YATORI_ICVE_DEBUG", "1")
+	} else {
+		_ = os.Unsetenv("YATORI_ICVE_DEBUG")
 	}
 	service.SetRuntimeQuestionBankSetting(cfg.Setting.ApiQueSetting)
 	p("\u65e5\u5fd7\u914d\u7f6e: level=%s model=%d file=%d", setting.BasicSetting.LogLevel, setting.BasicSetting.LogModel, setting.BasicSetting.LogOutFileSw)

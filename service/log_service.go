@@ -1,10 +1,8 @@
 package service
 
 import (
-	"bufio"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -17,8 +15,15 @@ import (
 const logBufSize = 1000
 
 type LogHub struct {
-	mu    sync.Mutex
-	lines []string
+	mu            sync.Mutex
+	lines         []string
+	disk          *rollingLog
+	debugDisk     *rollingLog
+	diskError     string
+	historyLoaded bool
+	closed        bool
+	captureMu     sync.Mutex
+	capture       *logCapture
 }
 
 func NewLogHub() *LogHub { return &LogHub{} }
@@ -29,17 +34,26 @@ var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 func stripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }
 func StripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }
 
-func (h *LogHub) Push(msg string) {
-	msg = toUTF8(stripANSI(msg))
+// Push returns exactly the sanitized text retained in memory and on disk.
+// Event publishers must use this return value, never the original payload.
+func (h *LogHub) Push(msg string) string {
+	msg = PrepareLogLine(msg)
 	if strings.TrimSpace(msg) == "" {
-		return
+		return ""
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.lines = append(h.lines, msg)
-	if len(h.lines) > logBufSize {
-		h.lines = h.lines[len(h.lines)-logBufSize:]
+	h.trimLocked()
+	if h.closed {
+		return msg
 	}
+	for _, w := range []*rollingLog{h.disk, h.debugDisk} {
+		if w != nil {
+			h.persistenceErrorLocked(w.write(msg + "\n"))
+		}
+	}
+	return msg
 }
 
 func (h *LogHub) Recent(n int) []string {
@@ -56,44 +70,36 @@ func (h *LogHub) Recent(n int) []string {
 	return cp
 }
 
-// HijackStdout 重定向 os.Stdout，按行过滤后推入 hub 并调用 emit。
-// 只保留含原核心特征词的行，过滤 Wails 框架噪音。
+// HijackStdout keeps diagnostic lines as well as business logs.
 func (h *LogHub) HijackStdout(emit func(string)) {
-	r, w, err := os.Pipe()
-	if err != nil {
+	h.captureMu.Lock()
+	defer h.captureMu.Unlock()
+	if h.capture != nil {
 		return
 	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		h.Push("[系统] 日志捕获初始化失败: " + err.Error())
+		return
+	}
+	c := &logCapture{originalOut: os.Stdout, originalErr: os.Stderr, writer: w, done: make(chan struct{})}
+	h.capture = c
 	os.Stdout = w
+	os.Stderr = w
 
 	go func() {
-		scanner := bufio.NewScanner(r)
-		for scanner.Scan() {
-			line := toUTF8(scanner.Text())
-			if isCoreLog(line) {
-				h.Push(line)
-				if emit != nil {
-					emit(line)
-				}
-			}
-		}
+		defer close(c.done)
+		defer r.Close()
+		h.consumeLogStream(r, emit)
 	}()
-	// 注意：不提供 restore，桌面程序生命周期内持续拦截
-	// 如需恢复，保存 os.Stdout 原值后调用 w.Close()
-	_ = r // keep reference
 }
 
 // HijackWriter 返回一个写入 hub 的 io.Writer（备用方案）
 func (h *LogHub) HijackWriter(emit func(string)) io.Writer {
 	pr, pw := io.Pipe()
 	go func() {
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			h.Push(line)
-			if emit != nil {
-				emit(line)
-			}
-		}
+		defer pr.Close()
+		h.consumeLogStream(pr, emit)
 	}()
 	return pw
 }
@@ -232,23 +238,7 @@ func TailLog(n int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	entries, err := os.ReadDir(logDir)
-	if os.IsNotExist(err) {
-		return []string{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var latest string
-	for _, e := range entries {
-		if !e.IsDir() {
-			latest = filepath.Join(logDir, e.Name())
-		}
-	}
-	if latest == "" {
-		return []string{}, nil
-	}
-	return tailFile(latest, n)
+	return tailLogsInDir(logDir, n)
 }
 
 func tailFile(path string, n int) ([]string, error) {
@@ -257,16 +247,44 @@ func tailFile(path string, n int) ([]string, error) {
 		return nil, err
 	}
 	defer f.Close()
-	var lines []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		lines = append(lines, stripANSI(scanner.Text()))
+	if n <= 0 || n > logBufSize {
+		n = logBufSize
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	// Read only the end of each file, not an unbounded historic log into RAM.
+	start := info.Size() - (2 << 20)
+	if start < 0 {
+		start = 0
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return nil, err
+	}
+	b, err := io.ReadAll(io.LimitReader(f, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if start > 0 {
+		if i := strings.IndexByte(string(b), '\n'); i >= 0 {
+			b = b[i+1:]
+		} else {
+			return []string{}, nil
+		}
+	}
+	lines := []string{}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = RedactDiagnosticText(NormalizeLogText(strings.TrimSuffix(line, "\r")))
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
 	}
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	return lines, scanner.Err()
+	return lines, nil
 }
 
 func fixUTF8AsGBKMojibake(s string) string { return fixMojibake(s) }
-func normalizeLogText(s string) string      { return NormalizeLogText(s) }
+func normalizeLogText(s string) string     { return NormalizeLogText(s) }

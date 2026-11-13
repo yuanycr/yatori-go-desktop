@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -42,6 +41,7 @@ type taskEntry struct {
 	cmd             *exec.Cmd
 	stopped         bool
 	logDone         chan struct{}
+	logDrained      chan struct{}
 	timer           *time.Timer
 	timerGeneration uint64
 }
@@ -118,16 +118,20 @@ func (m *TaskManager) Start(uid string) error {
 	}
 
 	cmd := exec.Command(exe, "--worker", "--uid", uid)
-	cmd.Stderr = os.Stderr
-
-	stdout, err := cmd.StdoutPipe()
+	stdout, writer, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("无法创建 stdout pipe: %w", err)
 	}
+	// Send panic/diagnostic output through the same parent-owned log writer.
+	cmd.Stdout = writer
+	cmd.Stderr = writer
 
 	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
+		_ = writer.Close()
 		return fmt.Errorf("启动 worker 失败: %w", err)
 	}
+	_ = writer.Close() // only the child retains the write handle
 
 	e := &taskEntry{
 		status: TaskStatus{
@@ -137,9 +141,10 @@ func (m *TaskManager) Start(uid string) error {
 			State:     StateRunning,
 			StartTime: time.Now().Format("2006-01-02 15:04:05"),
 		},
-		cmd:     cmd,
-		stopped: false,
-		logDone: make(chan struct{}),
+		cmd:        cmd,
+		stopped:    false,
+		logDone:    make(chan struct{}),
+		logDrained: make(chan struct{}),
 	}
 	m.tasks[uid] = e
 	if po.RunDurationMinutes > 0 {
@@ -151,9 +156,14 @@ func (m *TaskManager) Start(uid string) error {
 		m.emitter(uid, sysLog("worker 子进程已启动 pid=%d", cmd.Process.Pid))
 	}
 
-	go m.pipeLog(uid, e, stdout)
+	go func() {
+		defer close(e.logDrained)
+		defer stdout.Close()
+		m.pipeLog(uid, e, stdout)
+	}()
 	go func() {
 		_ = cmd.Wait()
+		<-e.logDrained
 		m.mu.RLock()
 		entry, ok := m.tasks[uid]
 		m.mu.RUnlock()
@@ -329,31 +339,44 @@ func (m *TaskManager) StopAll() {
 	for _, uid := range uids {
 		m.Stop(uid)
 	}
+	// Let already-written stdout/stderr reach the parent before its logger closes.
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for _, uid := range uids {
+		m.mu.RLock()
+		e := m.tasks[uid]
+		m.mu.RUnlock()
+		if e == nil || e.logDrained == nil {
+			continue
+		}
+		select {
+		case <-e.logDrained:
+		case <-deadline.C:
+			return
+		}
+	}
 }
 
 func (m *TaskManager) pipeLog(uid string, e *taskEntry, r io.Reader) {
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		select {
-		case <-e.logDone:
-			for scanner.Scan() {
-			}
-			return
-		default:
-		}
-		e.mu.Lock()
-		stopped := e.stopped
-		e.mu.Unlock()
-		if stopped {
-			for scanner.Scan() {
-			}
+	err := readLogLines(r, func(raw string) {
+		line := PrepareLogLine(raw)
+		if line == "" {
 			return
 		}
-		line := NormalizeLogText(scanner.Text())
 		if m.emitter != nil {
 			m.emitter(uid, line)
 		}
-		m.setLog(uid, line)
+		m.mu.RLock()
+		current := m.tasks[uid]
+		m.mu.RUnlock()
+		if current == e {
+			e.mu.Lock()
+			e.status.LastLog = line
+			e.mu.Unlock()
+		}
+	})
+	if err != nil && m.emitter != nil {
+		m.emitter(uid, sysLog("worker 日志读取失败: %v", err))
 	}
 }
 

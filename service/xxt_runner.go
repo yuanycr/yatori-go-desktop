@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1063,7 +1062,9 @@ func xxtAutoFetchExamCode(cache *xuexitongApi.XueXiTUserCache, exam *xuexitong.X
 		diag("auto exam code: enter finalURL=" + xxtShortText(finalURL, 160))
 		xxtFillExamFieldsFromRaw(exam, finalURL)
 		xxtFillExamFieldsFromRaw(exam, html)
-		if dumpPath, err := xxtSaveExamEnterDebugDump(exam, enterURL, finalURL, html); err == nil && dumpPath != "" {
+		if dumpPath, err := xxtSaveExamEnterDebugDump(exam, enterURL, finalURL, html); err != nil {
+			diag("[WARN] debug 保存失败: " + err.Error())
+		} else if dumpPath != "" {
 			diag("auto exam code: saved enter html=" + dumpPath)
 		}
 		if code, src := xxtExtractExamCode(finalURL); code != "" {
@@ -1084,7 +1085,9 @@ func xxtAutoFetchExamCode(cache *xuexitongApi.XueXiTUserCache, exam *xuexitong.X
 				diag("auto exam code: examJumpUrl finalURL=" + xxtShortText(jumpFinalURL, 160))
 				xxtFillExamFieldsFromRaw(exam, jumpFinalURL)
 				xxtFillExamFieldsFromRaw(exam, jumpHTML)
-				if dumpPath, err := xxtSaveExamEnterDebugDump(exam, xxtAbsoluteXXTURL(jumpURL), jumpFinalURL, jumpHTML); err == nil && dumpPath != "" {
+				if dumpPath, err := xxtSaveExamEnterDebugDump(exam, xxtAbsoluteXXTURL(jumpURL), jumpFinalURL, jumpHTML); err != nil {
+					diag("[WARN] debug 保存失败: " + err.Error())
+				} else if dumpPath != "" {
 					diag("auto exam code: saved jump html=" + dumpPath)
 				}
 				if code, src := xxtExtractExamCode(jumpFinalURL); code != "" {
@@ -1218,40 +1221,20 @@ func xxtAbsoluteXXTURL(raw string) string {
 	return "https://mooc1-api.chaoxing.com/" + raw
 }
 
-func xxtSaveExamEnterDebugDump(exam *xuexitong.XXTExam, requestURL, finalURL, html string) (string, error) {
-	if exam == nil || strings.TrimSpace(html) == "" {
+func xxtSaveExamEnterDebugDump(exam *xuexitong.XXTExam, requestURL, finalURL, page string) (string, error) {
+	if exam == nil || strings.TrimSpace(page) == "" {
 		return "", nil
+	}
+	enabled, err := debugDumpsEnabled()
+	if err != nil || !enabled {
+		return "", err
 	}
 	dir, err := DataDir()
 	if err != nil {
 		return "", err
 	}
-	debugDir := filepath.Join(dir, "debug", "xxt-exam")
-	if err := os.MkdirAll(debugDir, 0755); err != nil {
-		return "", err
-	}
-	name := xxtSafeFilePart(exam.Name)
-	if name == "" {
-		name = "exam"
-	}
-	task := xxtSafeFilePart(exam.TaskRefId)
-	if task == "" {
-		task = "task"
-	}
-	path := filepath.Join(debugDir, fmt.Sprintf("%s-%s.html", name, task))
-	content := strings.Builder{}
-	content.WriteString("<!-- Yatori XXT exam auto-code debug dump\n")
-	content.WriteString("examName: " + exam.Name + "\n")
-	content.WriteString("taskRefId: " + exam.TaskRefId + "\n")
-	content.WriteString("answerId: " + exam.AnswerId + "\n")
-	content.WriteString("courseId: " + exam.CourseId + "\n")
-	content.WriteString("classId: " + exam.ClazzId + "\n")
-	content.WriteString("cpi: " + exam.Cpi + "\n")
-	content.WriteString("requestURL: " + requestURL + "\n")
-	content.WriteString("finalURL: " + finalURL + "\n")
-	content.WriteString("-->\n")
-	content.WriteString(html)
-	return path, os.WriteFile(path, []byte(content.String()), 0644)
+	metadata := fmt.Sprintf("exam: %s\ntaskRefId: %s\nrequest: %s\nfinal: %s", exam.Name, exam.TaskRefId, requestURL, finalURL)
+	return saveDebugSnapshot(filepath.Join(dir, "debug", "xxt-exam"), metadata, page)
 }
 
 func xxtSafeFilePart(raw string) string {
@@ -1451,7 +1434,11 @@ func xxtEnterExamWithCodeDirect(cache *xuexitongApi.XueXiTUserCache, exam *xuexi
 		strings.Contains(lower, "code error") {
 		return fmt.Errorf("exam code rejected: %s", xxtShortText(paperHTML, 160))
 	}
-	if dumpPath, dumpErr := xxtSaveExamEnterDebugDump(exam, "phone/start with code", refererURL, paperHTML); dumpErr == nil && dumpPath != "" && xlog != nil {
+	if dumpPath, dumpErr := xxtSaveExamEnterDebugDump(exam, "phone/start with code", refererURL, paperHTML); dumpErr != nil {
+		if xlog != nil {
+			xlog(exam.Name, "[WARN] debug 保存失败: "+dumpErr.Error())
+		}
+	} else if dumpPath != "" && xlog != nil {
 		xlog(exam.Name, "direct exam-code entry: saved paper html="+dumpPath)
 	}
 	if exam.QuestionTotal <= 0 {

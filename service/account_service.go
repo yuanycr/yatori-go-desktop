@@ -235,7 +235,7 @@ func getAccountPO(uid string) (AccountPO, error) {
 	return row, err
 }
 
-func GetDashboard(mgr *TaskManager, cfgPath string) (Dashboard, error) {
+func GetDashboard(mgr *TaskManager, cfgPath string, hubs ...*LogHub) (Dashboard, error) {
 	_ = ensureDB()
 	var total int64
 	if db != nil {
@@ -248,7 +248,12 @@ func GetDashboard(mgr *TaskManager, cfgPath string) (Dashboard, error) {
 		}
 	}
 	_, cfgErr := LoadConfig(cfgPath)
-	logs, _ := TailLog(20)
+	var logs []string
+	if len(hubs) > 0 && hubs[0] != nil {
+		logs = hubs[0].Recent(20)
+	} else {
+		logs, _ = TailLog(20)
+	}
 	return Dashboard{
 		TotalAccounts: int(total),
 		RunningTasks:  running,

@@ -1,24 +1,41 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Users, Play, FileCheck, FolderOpen, RefreshCw, Megaphone } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, onAnyLog } from '../lib/api'
 import type { Dashboard } from '../lib/api'
 import { Spinner } from '../components/shared'
 
 export default function DashboardPage() {
   const [data, setData] = useState<Dashboard | null>(null)
   const [loading, setLoading] = useState(true)
+  const mounted = useRef(false)
+  const requestId = useRef(0)
+  const logRevision = useRef(0)
+  const pendingLogs = useRef<string[]>([])
 
   const load = () => {
+    const id = ++requestId.current
+    const revision = logRevision.current
     setLoading(true)
     api.getDashboard().then(r => {
-      if (r.ok) setData(r.data)
-    }).finally(() => setLoading(false))
+      if (!mounted.current || id !== requestId.current || !r.ok) return
+      setData(prev => ({ ...r.data, recentLogs: logRevision.current === revision
+        ? r.data.recentLogs
+        : (prev?.recentLogs ?? pendingLogs.current) }))
+    }).catch(() => { /* keep the last snapshot; the next poll can recover */ })
+      .finally(() => { if (mounted.current && id === requestId.current) setLoading(false) })
   }
 
   useEffect(() => {
+    mounted.current = true
+    const off = onAnyLog(item => {
+      if (!mounted.current || !item.msg) return
+      logRevision.current++
+      pendingLogs.current = [...pendingLogs.current, item.msg].slice(-20)
+      setData(prev => prev ? { ...prev, recentLogs: [...prev.recentLogs, item.msg].slice(-20) } : prev)
+    })
     load()
     const t = setInterval(load, 10000)
-    return () => clearInterval(t)
+    return () => { mounted.current = false; requestId.current++; off(); clearInterval(t) }
   }, [])
 
   if (loading && !data) return <div className="page"><Spinner /></div>

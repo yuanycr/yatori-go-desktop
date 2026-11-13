@@ -99,12 +99,13 @@ func (a *App) startup(ctx context.Context) {
 	a.icveCookie = service.NewICVECookieCapture()
 	// 拦截 os.Stdout：把原核心 lg.Print 输出桥接到 LogHub + Wails Events
 	a.logHub.HijackStdout(func(line string) {
-		clean := service.ToUTF8(service.StripANSI(line))
-		runtime.EventsEmit(a.ctx, "log:all", map[string]string{"uid": "_stdout", "msg": clean})
+		runtime.EventsEmit(a.ctx, "log:all", map[string]string{"uid": "_stdout", "msg": line})
 	})
 	a.taskMgr = service.NewTaskManager(func(uid, msg string) {
-		clean := service.ToUTF8(service.StripANSI(msg))
-		a.logHub.Push(clean)
+		clean := a.logHub.Push(msg)
+		if clean == "" {
+			return
+		}
 		runtime.EventsEmit(a.ctx, "log:"+uid, clean)
 		runtime.EventsEmit(a.ctx, "log:all", map[string]string{"uid": uid, "msg": clean})
 	})
@@ -115,10 +116,16 @@ func (a *App) startup(ctx context.Context) {
 		if cfg, e := service.LoadConfig(path); e == nil {
 			_ = service.SaveConfig(path, cfg)
 			a.taskMgr.SetMaxWorkers(5)
+			if err := a.configureLogging(cfg); err != nil {
+				a.logHub.Push("[系统] 日志保存初始化失败: " + err.Error())
+			}
 		}
 	}
+	a.logHub.Push("[系统] 桌面程序已启动")
 	// 初始化数据库（失败时只记录，不阻止启动）
-	_ = service.InitDB()
+	if err := service.InitDB(); err != nil {
+		a.logHub.Push("[系统] 数据库初始化失败: " + err.Error())
+	}
 }
 
 func (a *App) shutdown(_ context.Context) {
@@ -126,6 +133,22 @@ func (a *App) shutdown(_ context.Context) {
 	if a.icveCookie != nil {
 		a.icveCookie.Stop()
 	}
+	if a.logHub != nil {
+		a.logHub.Push("[系统] 桌面程序退出")
+		_ = a.logHub.Close()
+	}
+}
+
+func (a *App) configureLogging(cfg service.AppConfig) error {
+	if a.logHub == nil {
+		return nil
+	}
+	dir, err := service.DataDir()
+	if err != nil {
+		return err
+	}
+	return a.logHub.ConfigureFiles(dir, cfg.Setting.BasicSetting.LogOutFileSw == 1,
+		strings.EqualFold(cfg.Setting.BasicSetting.LogLevel, "DEBUG"))
 }
 
 // --- 配置 ---
@@ -149,6 +172,10 @@ func (a *App) SaveConfig(cfg service.AppConfig) BoolResult {
 		return BoolResult{Error: err.Error()}
 	}
 	a.taskMgr.SetMaxWorkers(5)
+	if err := a.configureLogging(cfg); err != nil {
+		a.logHub.Push("[系统] 日志保存配置失败: " + err.Error())
+		return BoolResult{Error: "配置已保存，但日志文件初始化失败: " + err.Error()}
+	}
 	return BoolResult{Ok: true}
 }
 
@@ -282,7 +309,7 @@ func (a *App) CancelXXTExamCodeRequest(id string) BoolResult {
 // --- 仪表盘 ---
 
 func (a *App) GetDashboard() DashboardResult {
-	d, err := service.GetDashboard(a.taskMgr, a.configPath)
+	d, err := service.GetDashboard(a.taskMgr, a.configPath, a.logHub)
 	if err != nil {
 		return DashboardResult{Error: err.Error()}
 	}
@@ -292,13 +319,17 @@ func (a *App) GetDashboard() DashboardResult {
 // --- 日志 ---
 
 func (a *App) TailLogFile(n int) StringListResult {
-	// 优先返回内存缓冲（LogEmitter 写入的实时日志）
-	mem := a.logHub.Recent(n)
-	// 补充文件日志（yatori-go-core 写入的）
-	file, _ := service.TailLog(n)
-	all := append(file, mem...)
-	if len(all) > n {
-		all = all[len(all)-n:]
+	// History is loaded once at startup. Re-reading the same file here would
+	// duplicate every live log line because LogHub now persists its own output.
+	var all []string
+	if a.logHub != nil {
+		all = a.logHub.Recent(n)
+	} else {
+		var err error
+		all, err = service.TailLog(n)
+		if err != nil {
+			return StringListResult{Error: err.Error()}
+		}
 	}
 	if all == nil {
 		all = []string{}
@@ -306,7 +337,7 @@ func (a *App) TailLogFile(n int) StringListResult {
 	return StringListResult{Ok: true, Data: all}
 }
 
-// GetRecentLogs 供日志页初次加载时拉取历史（内存缓冲 + 文件）
+// GetRecentLogs returns the shared live buffer, seeded from disk at startup.
 func (a *App) GetRecentLogs(n int) StringListResult {
 	return a.TailLogFile(n)
 }
@@ -430,7 +461,7 @@ func fetchLatestGitHubRelease() (githubRelease, error) {
 	status, err := getJSON(client, "https://api.github.com/repos/yuanycr/yatori-go-desktop/releases/latest", &release)
 	if err == nil && release.TagName != "" {
 		if release.HTMLURL == "" {
-		release.HTMLURL = "https://github.com/yuanycr/yatori-go-desktop/releases"
+			release.HTMLURL = "https://github.com/yuanycr/yatori-go-desktop/releases"
 		}
 		return release, nil
 	}
